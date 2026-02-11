@@ -1,0 +1,31 @@
+# Core framework
+reflex>=0.7.0
+
+# Charts
+plotly>=6.0.0
+
+# AI / LLM
+vanna[chromadb,ollama]>=0.7.0,<1.0
+chromadb>=0.5.0
+
+# SQL parsing & validation
+sqlglot>=26.0.0
+
+# Database connectors
+oracledb>=3.0.0
+asyncpg>=0.30.0
+psycopg2-binary>=2.9.0
+
+# Data processing
+pandas>=2.2.0
+
+# Configuration & security
+pydantic-settings>=2.7.0
+cryptography>=44.0.0
+
+# Logging
+structlog>=24.0.0
+
+# Dev / Testing
+pytest>=8.0.0
+pytest-asyncio>=0.24.0

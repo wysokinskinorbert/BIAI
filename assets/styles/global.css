@@ -1,0 +1,138 @@
+/* BIAI - Global Styles: Dark mode, animations, glow effects */
+
+/* Base */
+:root {
+    --glow-primary: rgba(139, 92, 246, 0.4);
+    --glow-success: rgba(34, 197, 94, 0.4);
+    --glow-info: rgba(59, 130, 246, 0.4);
+    --glow-warning: rgba(234, 179, 8, 0.4);
+    --glow-error: rgba(239, 68, 68, 0.4);
+}
+
+/* Smooth scrollbar */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--gray-a5);
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--gray-a7);
+}
+
+/* App container */
+.app-container {
+    background: var(--color-background);
+}
+
+/* Glow effects for cards */
+.glow-card {
+    transition: box-shadow 0.3s ease;
+}
+
+.glow-card:hover {
+    box-shadow: 0 0 20px var(--glow-primary);
+}
+
+/* Chat message animations */
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.chat-message-enter {
+    animation: fadeInUp 0.3s ease-out;
+}
+
+/* Streaming cursor */
+@keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+}
+
+.streaming-cursor::after {
+    content: '|';
+    animation: blink 1s infinite;
+    color: var(--accent-9);
+}
+
+/* Pulse animation for connected indicator */
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+.pulse {
+    animation: pulse 2s infinite;
+}
+
+/* Chart container glow */
+#echarts-container {
+    border: 1px solid var(--gray-a4);
+    transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+#echarts-container:hover {
+    border-color: var(--accent-7);
+    box-shadow: 0 0 15px var(--glow-primary);
+}
+
+/* Table hover rows */
+.rt-TableRow:hover {
+    background: var(--gray-a3) !important;
+}
+
+/* Input focus glow */
+.rt-TextFieldInput:focus {
+    box-shadow: 0 0 0 2px var(--accent-5), 0 0 15px var(--glow-primary) !important;
+}
+
+/* Button glow on hover */
+.rt-Button[data-accent-color]:hover {
+    box-shadow: 0 0 10px var(--glow-primary);
+}
+
+/* Sidebar transition */
+.sidebar-enter {
+    animation: slideInLeft 0.2s ease-out;
+}
+
+@keyframes slideInLeft {
+    from {
+        transform: translateX(-100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+/* Code block dark styling */
+.rt-Code {
+    background: var(--gray-a3) !important;
+}
+
+/* Card subtle border */
+.rt-Card {
+    border: 1px solid var(--gray-a4);
+    transition: border-color 0.2s ease;
+}
+
+.rt-Card:hover {
+    border-color: var(--gray-a6);
+}
