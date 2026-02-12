@@ -122,10 +122,7 @@ def _settings_panel() -> rx.Component:
         rx.hstack(
             rx.text("Dark mode", size="2"),
             rx.spacer(),
-            rx.switch(
-                checked=BaseState.is_dark_mode,
-                on_change=BaseState.toggle_dark_mode,
-            ),
+            rx.color_mode.switch(),
             width="100%",
             align="center",
         ),

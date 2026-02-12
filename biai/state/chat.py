@@ -67,8 +67,10 @@ class ChatState(rx.State):
             })
 
         try:
-            # Read DB state under its lock
-            db_state = await self.get_state(DBState)
+            # get_state must be called inside async with self (StateProxy requirement)
+            async with self:
+                db_state = await self.get_state(DBState)
+
             is_connected = False
             connector = None
             db_type_str = ""
@@ -92,8 +94,10 @@ class ChatState(rx.State):
             from biai.models.connection import DBType
             from biai.components.model_selector import ModelState
 
-            # Read model state under its lock
-            model_state = await self.get_state(ModelState)
+            # get_state must be called inside async with self
+            async with self:
+                model_state = await self.get_state(ModelState)
+
             selected_model = ""
             ollama_host = ""
             async with model_state:
@@ -125,8 +129,9 @@ class ChatState(rx.State):
             result = await pipeline.process(question)
 
             if result.success and result.query_result:
-                # Update QueryState under its own lock
-                query_state = await self.get_state(QueryState)
+                # get_state must be called inside async with self
+                async with self:
+                    query_state = await self.get_state(QueryState)
                 async with query_state:
                     query_state.set_query_result(
                         sql=result.sql_query.sql,
@@ -141,7 +146,8 @@ class ChatState(rx.State):
 
                 # Build chart if recommended
                 if result.chart_config and result.df is not None:
-                    chart_state = await self.get_state(ChartState)
+                    async with self:
+                        chart_state = await self.get_state(ChartState)
                     plotly_data, plotly_layout = _build_plotly_figure(result.chart_config, result.df)
                     if plotly_data:
                         async with chart_state:

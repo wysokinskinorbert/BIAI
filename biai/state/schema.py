@@ -52,7 +52,8 @@ class SchemaState(rx.State):
             self.schema_error = ""
 
         try:
-            db_state = await self.get_state(DBState)
+            async with self:
+                db_state = await self.get_state(DBState)
             connector = None
             async with db_state:
                 connector = db_state._connector

@@ -106,7 +106,8 @@ class DBState(rx.State):
                     manager = SchemaManager(connector)
                     snapshot = await manager.get_snapshot(force_refresh=True)
 
-                    schema_state = await self.get_state(SchemaState)
+                    async with self:
+                        schema_state = await self.get_state(SchemaState)
                     tables_flat: list[dict[str, str]] = []
                     tables_full: list[dict] = []
                     for table in snapshot.tables:
@@ -147,7 +148,8 @@ class DBState(rx.State):
         # Reset schema training flag so next connect retrains
         try:
             from biai.state.chat import ChatState
-            chat_state = await self.get_state(ChatState)
+            async with self:
+                chat_state = await self.get_state(ChatState)
             async with chat_state:
                 chat_state._schema_trained = False
         except Exception:

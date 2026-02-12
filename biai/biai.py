@@ -9,7 +9,7 @@ from biai.pages.settings import settings_page
 # Dark theme configuration
 app = rx.App(
     theme=rx.theme(
-        appearance="dark",
+        appearance="inherit",
         accent_color="violet",
         gray_color="slate",
         radius="medium",

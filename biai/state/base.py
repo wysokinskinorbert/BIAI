@@ -6,9 +6,6 @@ import reflex as rx
 class BaseState(rx.State):
     """Base state with shared app-level properties."""
 
-    # Theme
-    is_dark_mode: bool = True
-
     # Sidebar
     sidebar_open: bool = True
     sidebar_section: str = "connection"  # connection | schema | settings
@@ -19,9 +16,6 @@ class BaseState(rx.State):
     # Notifications
     notification: str = ""
     notification_type: str = "info"  # info | success | error | warning
-
-    def toggle_dark_mode(self):
-        self.is_dark_mode = not self.is_dark_mode
 
     def toggle_sidebar(self):
         self.sidebar_open = not self.sidebar_open
