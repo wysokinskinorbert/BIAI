@@ -46,56 +46,68 @@ class SchemaState(rx.State):
     @rx.event(background=True)
     async def refresh_schema(self):
         from biai.state.database import DBState
+        from biai.models.connection import DBType, ConnectionConfig
 
         async with self:
             self.is_loading = True
             self.schema_error = ""
 
         try:
+            # Read serialized config from DBState (not _connector which is transient)
             async with self:
                 db_state = await self.get_state(DBState)
-            connector = None
             async with db_state:
-                connector = db_state._connector
+                if not db_state.is_connected:
+                    async with self:
+                        self.schema_error = "Not connected to database"
+                        self.is_loading = False
+                    return
+                config = db_state._get_config()
 
-            if not connector:
-                async with self:
-                    self.schema_error = "Not connected to database"
-                    self.is_loading = False
-                return
+            # Create a temporary connector from config
+            if config.db_type == DBType.ORACLE:
+                from biai.db.oracle import OracleConnector
+                connector = OracleConnector(config)
+            else:
+                from biai.db.postgresql import PostgreSQLConnector
+                connector = PostgreSQLConnector(config)
 
-            from biai.db.schema_manager import SchemaManager
-            manager = SchemaManager(connector)
-            snapshot = await manager.get_snapshot(force_refresh=True)
+            await connector.connect()
+            try:
+                from biai.db.schema_manager import SchemaManager
+                manager = SchemaManager(connector)
+                snapshot = await manager.get_snapshot(force_refresh=True)
 
-            tables_flat: list[dict[str, str]] = []
-            tables_full: list[dict] = []
+                tables_flat: list[dict[str, str]] = []
+                tables_full: list[dict] = []
 
-            for table in snapshot.tables:
-                cols = []
-                for col in table.columns:
-                    cols.append({
-                        "name": col.name,
-                        "data_type": col.data_type,
+                for table in snapshot.tables:
+                    cols = []
+                    for col in table.columns:
+                        cols.append({
+                            "name": col.name,
+                            "data_type": col.data_type,
+                        })
+
+                    tables_flat.append({
+                        "name": table.name,
+                        "schema": table.schema_name,
+                        "col_count": str(len(cols)),
                     })
 
-                # Flat version for the table list (foreach-safe)
-                tables_flat.append({
-                    "name": table.name,
-                    "schema": table.schema_name,
-                    "col_count": str(len(cols)),
-                })
+                    tables_full.append({
+                        "name": table.name,
+                        "columns": cols,
+                    })
 
-                # Full version with columns (for select_table lookup)
-                tables_full.append({
-                    "name": table.name,
-                    "columns": cols,
-                })
-
-            async with self:
-                self.tables = tables_flat
-                self._tables_full = tables_full
-                self.is_loading = False
+                async with self:
+                    self.tables = tables_flat
+                    self._tables_full = tables_full
+                    self.selected_table = ""
+                    self.selected_columns = []
+                    self.is_loading = False
+            finally:
+                await connector.disconnect()
         except Exception as e:
             async with self:
                 self.schema_error = str(e)

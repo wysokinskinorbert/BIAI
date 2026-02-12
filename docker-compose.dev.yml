@@ -21,7 +21,7 @@ services:
     image: postgres:16
     container_name: biai-postgres-test
     ports:
-      - "5432:5432"
+      - "5433:5432"
     environment:
       POSTGRES_DB: biai_test
       POSTGRES_USER: biai

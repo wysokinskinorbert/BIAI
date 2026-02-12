@@ -69,6 +69,10 @@ class PostgreSQLConnector(DatabaseConnector):
         if not self._pool:
             raise RuntimeError("Not connected to PostgreSQL")
 
+        # Default to "public" if empty string passed
+        if not schema:
+            schema = "public"
+
         async with self._pool.acquire() as conn:
             # Get tables
             table_rows = await conn.fetch("""
