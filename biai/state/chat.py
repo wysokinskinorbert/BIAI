@@ -271,7 +271,7 @@ def _build_plotly_figure(chart_config, df) -> tuple[list[dict], dict]:
         return [], {}
 
     x_col = chart_config.x_column
-    y_cols = chart_config.y_columns
+    y_cols = [c for c in chart_config.y_columns if c != x_col]
 
     if not x_col or not y_cols:
         return [], {}

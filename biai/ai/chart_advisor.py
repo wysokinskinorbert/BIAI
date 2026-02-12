@@ -54,7 +54,15 @@ class ChartAdvisor:
 
         if (is_time or has_date_col) and num_cols:
             x_col = cat_cols[0] if cat_cols else df.columns[0]
-            y_cols = num_cols[:3]
+            # Separate index-like numeric cols from value cols
+            index_patterns = {"month", "year", "day", "week", "quarter", "period", "date", "id"}
+            value_cols = [c for c in num_cols if not any(p in c.lower() for p in index_patterns)]
+            if not value_cols:
+                value_cols = num_cols[-1:]  # fallback: last numeric column is likely the value
+            # Never include x_col in y_cols
+            y_cols = [c for c in value_cols if c != x_col][:3]
+            if not y_cols:
+                y_cols = [num_cols[-1]]
             return ChartConfig(
                 chart_type=ChartType.LINE,
                 x_column=x_col,
@@ -85,12 +93,15 @@ class ChartAdvisor:
 
         # Default: bar chart (categories + numbers)
         if cat_cols and num_cols:
-            return ChartConfig(
-                chart_type=ChartType.BAR,
-                x_column=cat_cols[0],
-                y_columns=num_cols[:3],
-                title=_generate_title(question),
-            )
+            x_col = cat_cols[0]
+            y_cols = [c for c in num_cols if c != x_col][:3]
+            if y_cols:
+                return ChartConfig(
+                    chart_type=ChartType.BAR,
+                    x_column=x_col,
+                    y_columns=y_cols,
+                    title=_generate_title(question),
+                )
 
         # All-numeric columns: use first column as x-axis (ID/label), rest as y
         if len(num_cols) >= 2:
