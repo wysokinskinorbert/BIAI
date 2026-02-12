@@ -2,6 +2,8 @@
 
 import reflex as rx
 
+from biai.config.constants import DISPLAY_ROW_LIMIT
+
 
 class QueryState(rx.State):
     """Manages current query state, SQL display, and data table."""
@@ -17,9 +19,6 @@ class QueryState(rx.State):
     row_count: int = 0
     execution_time_ms: float = 0.0
     is_truncated: bool = False
-
-    # Loading
-    is_executing: bool = False
 
     def set_query_result(
         self,
@@ -70,7 +69,7 @@ class QueryState(rx.State):
     @rx.var
     def display_rows(self) -> list[list[str]]:
         """Return rows for display (limited to 100)."""
-        return self.rows[:100]
+        return self.rows[:DISPLAY_ROW_LIMIT]
 
     @rx.var
     def execution_time_display(self) -> str:

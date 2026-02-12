@@ -4,10 +4,10 @@ import reflex as rx
 
 from biai.state.base import BaseState
 from biai.state.database import DBState
-from biai.state.schema import SchemaState
 from biai.components.connection_form import connection_form
 from biai.components.schema_explorer import schema_explorer
 from biai.components.model_selector import model_selector
+from biai.pages.settings import SettingsState
 
 
 def sidebar() -> rx.Component:
@@ -123,16 +123,104 @@ def _settings_panel() -> rx.Component:
     return rx.vstack(
         rx.text("Settings", size="3", weight="bold"),
 
-        # Dark mode toggle
+        # Appearance
+        _sidebar_settings_section(
+            "Appearance", "palette",
+            rx.hstack(
+                rx.text("Dark mode", size="2"),
+                rx.spacer(),
+                rx.color_mode.switch(),
+                width="100%",
+                align="center",
+            ),
+        ),
+
+        # Ollama LLM
+        _sidebar_settings_section(
+            "Ollama LLM", "brain",
+            _sidebar_field("Host", SettingsState.settings_ollama_host, SettingsState.set_ollama_host),
+            _sidebar_field("Model", SettingsState.settings_ollama_model, SettingsState.set_ollama_model),
+        ),
+
+        # ChromaDB
+        _sidebar_settings_section(
+            "ChromaDB", "database",
+            _sidebar_field("Host", SettingsState.settings_chroma_host, SettingsState.set_chroma_host),
+            _sidebar_field("Collection", SettingsState.settings_chroma_collection, SettingsState.set_chroma_collection),
+        ),
+
+        # Query Execution
+        _sidebar_settings_section(
+            "Query", "timer",
+            _sidebar_field("Timeout (s)", SettingsState.settings_query_timeout, SettingsState.set_query_timeout),
+            _sidebar_field("Row limit", SettingsState.settings_row_limit, SettingsState.set_row_limit),
+        ),
+
+        # Action buttons
         rx.hstack(
-            rx.text("Dark mode", size="2"),
-            rx.spacer(),
-            rx.color_mode.switch(),
+            rx.button(
+                rx.icon("save", size=14),
+                "Save",
+                on_click=SettingsState.save_settings,
+                size="1",
+                flex="1",
+            ),
+            rx.button(
+                rx.icon("rotate-ccw", size=14),
+                "Reset",
+                on_click=SettingsState.reset_defaults,
+                variant="outline",
+                size="1",
+                flex="1",
+            ),
             width="100%",
-            align="center",
+            spacing="2",
+        ),
+
+        # Status message
+        rx.callout(
+            SettingsState.save_message,
+            icon="check",
+            color_scheme="green",
+            size="1",
+            width="100%",
+            display=rx.cond(SettingsState.save_message != "", "flex", "none"),
         ),
 
         width="100%",
         spacing="3",
         padding="8px",
+    )
+
+
+def _sidebar_settings_section(title: str, icon_name: str, *children) -> rx.Component:
+    """Compact settings section for sidebar."""
+    return rx.vstack(
+        rx.hstack(
+            rx.icon(icon_name, size=14, color="var(--accent-9)"),
+            rx.text(title, size="2", weight="medium"),
+            align="center",
+            spacing="2",
+        ),
+        *children,
+        width="100%",
+        spacing="2",
+        padding="8px",
+        border="1px solid var(--gray-a5)",
+        border_radius="var(--radius-2)",
+    )
+
+
+def _sidebar_field(label: str, value, on_change) -> rx.Component:
+    """Compact settings field for sidebar."""
+    return rx.vstack(
+        rx.text(label, size="1", color="var(--gray-11)"),
+        rx.input(
+            value=value,
+            on_change=on_change,
+            size="1",
+            width="100%",
+        ),
+        width="100%",
+        spacing="1",
     )

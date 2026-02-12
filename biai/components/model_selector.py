@@ -2,7 +2,7 @@
 
 import reflex as rx
 
-from biai.config.constants import DEFAULT_MODEL
+from biai.config.constants import DEFAULT_MODEL, DEFAULT_OLLAMA_HOST
 
 
 class ModelState(rx.State):
@@ -10,7 +10,7 @@ class ModelState(rx.State):
 
     available_models: list[str] = [DEFAULT_MODEL]
     selected_model: str = DEFAULT_MODEL
-    ollama_host: str = "http://localhost:11434"
+    ollama_host: str = DEFAULT_OLLAMA_HOST
     is_loading: bool = False
     error: str = ""
 
@@ -84,10 +84,14 @@ def model_selector() -> rx.Component:
             spacing="2",
         ),
 
-        # Error
-        rx.cond(
-            ModelState.error != "",
-            rx.text(ModelState.error, size="1", color="red.11"),
+        # Error (CSS display to avoid ghost a11y node)
+        rx.callout(
+            ModelState.error,
+            icon="triangle-alert",
+            color_scheme="red",
+            size="1",
+            width="100%",
+            display=rx.cond(ModelState.error != "", "flex", "none"),
         ),
 
         width="100%",

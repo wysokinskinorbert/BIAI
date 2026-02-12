@@ -14,12 +14,6 @@ def chart_card() -> rx.Component:
                 rx.icon("bar-chart-3", size=16, color="var(--accent-9)"),
                 rx.text(ChartState.chart_title, size="3", weight="medium"),
                 rx.spacer(),
-                rx.icon_button(
-                    rx.icon("maximize-2", size=14),
-                    variant="ghost",
-                    size="1",
-                    on_click=ChartState.toggle_fullscreen,
-                ),
                 width="100%",
                 align="center",
             ),

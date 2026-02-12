@@ -3,7 +3,10 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 
-from biai.config.constants import DEFAULT_MODEL
+from biai.config.constants import (
+    DEFAULT_MODEL, DEFAULT_OLLAMA_HOST, DEFAULT_CHROMA_HOST,
+    DEFAULT_CHROMA_COLLECTION, QUERY_TIMEOUT, ROW_LIMIT,
+)
 
 
 class AppSettings(BaseSettings):
@@ -16,12 +19,12 @@ class AppSettings(BaseSettings):
     )
 
     # Ollama
-    ollama_host: str = Field(default="http://localhost:11434")
+    ollama_host: str = Field(default=DEFAULT_OLLAMA_HOST)
     ollama_model: str = Field(default=DEFAULT_MODEL)
 
     # ChromaDB
-    chroma_host: str = Field(default="http://localhost:8000")
-    chroma_collection: str = Field(default="biai_schema")
+    chroma_host: str = Field(default=DEFAULT_CHROMA_HOST)
+    chroma_collection: str = Field(default=DEFAULT_CHROMA_COLLECTION)
 
     # Oracle
     oracle_dsn: str = Field(default="")
@@ -37,8 +40,8 @@ class AppSettings(BaseSettings):
     # App
     app_debug: bool = Field(default=False)
     app_log_level: str = Field(default="INFO")
-    query_timeout: int = Field(default=30)
-    query_row_limit: int = Field(default=10_000)
+    query_timeout: int = Field(default=QUERY_TIMEOUT)
+    query_row_limit: int = Field(default=ROW_LIMIT)
 
 
 def get_settings() -> AppSettings:

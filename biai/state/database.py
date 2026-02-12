@@ -1,8 +1,8 @@
 """Database connection state."""
 
-import asyncio
 import reflex as rx
 
+from biai.config.constants import DEFAULT_DB_HOST, DEFAULT_POSTGRESQL_PORT, DEFAULT_ORACLE_PORT
 from biai.models.connection import DBType, ConnectionConfig
 
 
@@ -11,8 +11,8 @@ class DBState(rx.State):
 
     # Connection form fields
     db_type: str = "postgresql"
-    host: str = "localhost"
-    port: int = 5432
+    host: str = DEFAULT_DB_HOST
+    port: int = DEFAULT_POSTGRESQL_PORT
     database: str = ""
     username: str = ""
     password: str = ""
@@ -31,9 +31,9 @@ class DBState(rx.State):
         self.db_type = value
         self.connection_error = ""
         if value == "oracle":
-            self.port = 1521
+            self.port = DEFAULT_ORACLE_PORT
         else:
-            self.port = 5432
+            self.port = DEFAULT_POSTGRESQL_PORT
 
     def set_host(self, value: str):
         self.host = value
@@ -178,17 +178,26 @@ class DBState(rx.State):
         except Exception:
             pass
 
-        # Clear dashboard (query results + chart)
+        # Clear dashboard (query results + chart) and schema
         try:
             from biai.state.query import QueryState
             from biai.state.chart import ChartState
+            from biai.state.schema import SchemaState
             async with self:
                 query_state = await self.get_state(QueryState)
                 chart_state = await self.get_state(ChartState)
+                schema_state = await self.get_state(SchemaState)
             async with query_state:
                 query_state.clear_result()
             async with chart_state:
                 chart_state.clear_chart()
+            async with schema_state:
+                schema_state.tables = []
+                schema_state._tables_full = []
+                schema_state.selected_table = ""
+                schema_state.selected_columns = []
+                schema_state.search_query = ""
+                schema_state.schema_error = ""
         except Exception:
             pass
 

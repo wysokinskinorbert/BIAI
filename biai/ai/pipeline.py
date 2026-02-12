@@ -12,7 +12,7 @@ from biai.ai.self_correction import SelfCorrectionLoop
 from biai.ai.chart_advisor import ChartAdvisor
 from biai.ai.training import SchemaTrainer
 from biai.ai.prompt_templates import DESCRIPTION_PROMPT, SYSTEM_PROMPT, format_dialect_rules
-from biai.config.constants import DEFAULT_MODEL
+from biai.config.constants import DEFAULT_MODEL, DEFAULT_OLLAMA_HOST, DEFAULT_CHROMA_COLLECTION
 from biai.db.base import DatabaseConnector
 from biai.db.dialect import DialectHelper
 from biai.db.schema_manager import SchemaManager
@@ -51,9 +51,9 @@ class AIPipeline:
         connector: DatabaseConnector,
         db_type: DBType = DBType.POSTGRESQL,
         ollama_model: str = DEFAULT_MODEL,
-        ollama_host: str = "http://localhost:11434",
+        ollama_host: str = DEFAULT_OLLAMA_HOST,
         chroma_host: str | None = None,
-        chroma_collection: str = "biai_schema",
+        chroma_collection: str = DEFAULT_CHROMA_COLLECTION,
     ):
         self._connector = connector
         self._db_type = db_type

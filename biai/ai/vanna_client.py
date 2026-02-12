@@ -3,7 +3,7 @@
 from vanna.chromadb import ChromaDB_VectorStore
 from vanna.ollama import Ollama
 
-from biai.config.constants import DEFAULT_MODEL
+from biai.config.constants import DEFAULT_MODEL, DEFAULT_OLLAMA_HOST, DEFAULT_CHROMA_COLLECTION
 from biai.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -48,10 +48,10 @@ class MyVanna(ChromaDB_VectorStore, Ollama):
 
 def create_vanna_client(
     model: str = DEFAULT_MODEL,
-    ollama_host: str = "http://localhost:11434",
+    ollama_host: str = DEFAULT_OLLAMA_HOST,
     chroma_host: str | None = None,
     chroma_port: int | None = None,
-    chroma_collection: str = "biai_schema",
+    chroma_collection: str = DEFAULT_CHROMA_COLLECTION,
 ) -> MyVanna:
     """Factory function to create configured Vanna client."""
     config: dict = {

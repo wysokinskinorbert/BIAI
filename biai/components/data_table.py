@@ -11,7 +11,7 @@ def data_table() -> rx.Component:
         rx.vstack(
             # Header
             rx.hstack(
-                rx.icon("table-2", size=16, color="green.9"),
+                rx.icon("table-2", size=16, color="var(--accent-9)"),
                 rx.text("Results", size="3", weight="medium"),
                 rx.spacer(),
                 rx.badge(

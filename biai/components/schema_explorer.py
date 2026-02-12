@@ -26,14 +26,13 @@ def schema_explorer() -> rx.Component:
         ),
 
         # Not connected warning
-        rx.cond(
-            ~DBState.is_connected,
-            rx.callout(
-                "Connect to a database first",
-                icon="info",
-                size="1",
-                width="100%",
-            ),
+        rx.callout(
+            "Connect to a database first",
+            icon="info",
+            color_scheme="blue",
+            size="1",
+            width="100%",
+            display=rx.cond(~DBState.is_connected, "flex", "none"),
         ),
 
         # Search
@@ -48,10 +47,14 @@ def schema_explorer() -> rx.Component:
             ),
         ),
 
-        # Error
-        rx.cond(
-            SchemaState.schema_error != "",
-            rx.text(SchemaState.schema_error, size="1", color="red.11"),
+        # Error (CSS display to avoid ghost a11y node)
+        rx.callout(
+            SchemaState.schema_error,
+            icon="triangle-alert",
+            color_scheme="red",
+            size="1",
+            width="100%",
+            display=rx.cond(SchemaState.schema_error != "", "flex", "none"),
         ),
 
         # Table list (flat - no nested foreach)

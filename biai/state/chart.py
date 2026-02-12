@@ -1,6 +1,7 @@
 """Chart state for dashboard visualization."""
 
 from typing import Any
+
 import reflex as rx
 import plotly.graph_objects as go
 
@@ -13,31 +14,22 @@ class ChartState(rx.State):
     show_plotly: bool = False
 
     # Chart info
-    chart_type: str = ""
     chart_title: str = ""
 
     # Version counter – forces React key change → Plotly component re-mount
     chart_version: int = 0
 
-    # Fullscreen
-    is_fullscreen: bool = False
-
     def set_plotly(self, data: list[dict], layout: dict[str, Any], title: str = ""):
         self.plotly_fig_data = {"data": data, "layout": layout}
         self.show_plotly = True
-        self.chart_type = "plotly"
         self.chart_title = title
         self.chart_version += 1
 
     def clear_chart(self):
         self.plotly_fig_data = {}
         self.show_plotly = False
-        self.chart_type = ""
         self.chart_title = ""
         self.chart_version += 1
-
-    def toggle_fullscreen(self):
-        self.is_fullscreen = not self.is_fullscreen
 
     @rx.var
     def plotly_figure(self) -> go.Figure:

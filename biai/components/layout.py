@@ -3,6 +3,7 @@
 import reflex as rx
 
 from biai.state.base import BaseState
+from biai.config.constants import CHAT_PANEL_WIDTH, DASHBOARD_PANEL_WIDTH
 from biai.components.sidebar import sidebar
 from biai.components.chat_panel import chat_panel
 from biai.components.dashboard_panel import dashboard_panel
@@ -36,7 +37,7 @@ def main_layout() -> rx.Component:
                 # Chat panel (left, 40%)
                 rx.box(
                     chat_panel(),
-                    width="40%",
+                    width=CHAT_PANEL_WIDTH,
                     height="100vh",
                     border_right="1px solid var(--gray-a5)",
                     overflow="hidden",
@@ -44,7 +45,7 @@ def main_layout() -> rx.Component:
                 # Dashboard panel (right, 60%)
                 rx.box(
                     dashboard_panel(),
-                    width="60%",
+                    width=DASHBOARD_PANEL_WIDTH,
                     height="100vh",
                     overflow="hidden",
                 ),

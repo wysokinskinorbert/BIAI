@@ -34,6 +34,7 @@ def sql_viewer() -> rx.Component:
                         variant="ghost",
                         size="1",
                         on_click=rx.set_clipboard(QueryState.current_sql),
+                        aria_label="Copy SQL",
                     ),
                     content="Copy SQL",
                 ),

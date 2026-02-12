@@ -20,15 +20,19 @@ def dashboard_panel() -> rx.Component:
             # Export CSV button
             rx.cond(
                 QueryState.has_data,
-                rx.button(
-                    rx.icon("download", size=14),
-                    "CSV",
-                    variant="outline",
-                    size="1",
-                    on_click=rx.download(
-                        data=QueryState.csv_data,
-                        filename="biai_export.csv",
+                rx.tooltip(
+                    rx.button(
+                        rx.icon("download", size=14),
+                        "CSV",
+                        variant="outline",
+                        size="1",
+                        on_click=rx.download(
+                            data=QueryState.csv_data,
+                            filename="biai_export.csv",
+                        ),
+                        aria_label="Export CSV",
                     ),
+                    content="Export data as CSV",
                 ),
             ),
             width="100%",

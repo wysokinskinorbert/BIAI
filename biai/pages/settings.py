@@ -2,23 +2,26 @@
 
 import reflex as rx
 
-from biai.config.constants import DEFAULT_MODEL
+from biai.config.constants import (
+    DEFAULT_MODEL, DEFAULT_OLLAMA_HOST, DEFAULT_CHROMA_HOST,
+    DEFAULT_CHROMA_COLLECTION, QUERY_TIMEOUT, ROW_LIMIT,
+)
 
 
 class SettingsState(rx.State):
     """State for application settings."""
 
     # Ollama
-    settings_ollama_host: str = "http://localhost:11434"
+    settings_ollama_host: str = DEFAULT_OLLAMA_HOST
     settings_ollama_model: str = DEFAULT_MODEL
 
     # ChromaDB
-    settings_chroma_host: str = "http://localhost:8000"
-    settings_chroma_collection: str = "biai_schema"
+    settings_chroma_host: str = DEFAULT_CHROMA_HOST
+    settings_chroma_collection: str = DEFAULT_CHROMA_COLLECTION
 
     # Query (stored as str for input binding)
-    settings_query_timeout: str = "30"
-    settings_row_limit: str = "10000"
+    settings_query_timeout: str = str(QUERY_TIMEOUT)
+    settings_row_limit: str = str(ROW_LIMIT)
 
     # Status
     save_message: str = ""
@@ -49,21 +52,18 @@ class SettingsState(rx.State):
         self.save_message = "Settings saved successfully."
 
     async def reset_defaults(self):
-        self.settings_ollama_host = "http://localhost:11434"
+        self.settings_ollama_host = DEFAULT_OLLAMA_HOST
         self.settings_ollama_model = DEFAULT_MODEL
-        self.settings_chroma_host = "http://localhost:8000"
-        self.settings_chroma_collection = "biai_schema"
-        self.settings_query_timeout = "30"
-        self.settings_row_limit = "10000"
+        self.settings_chroma_host = DEFAULT_CHROMA_HOST
+        self.settings_chroma_collection = DEFAULT_CHROMA_COLLECTION
+        self.settings_query_timeout = str(QUERY_TIMEOUT)
+        self.settings_row_limit = str(ROW_LIMIT)
         self.save_message = "Settings reset to defaults."
         # Propagate defaults back to ModelState
         from biai.components.model_selector import ModelState
         model_state = await self.get_state(ModelState)
         model_state.ollama_host = self.settings_ollama_host
         model_state.selected_model = self.settings_ollama_model
-
-    def clear_message(self):
-        self.save_message = ""
 
 
 def _settings_section(title: str, icon_name: str, *children) -> rx.Component:
@@ -129,7 +129,7 @@ def settings_page() -> rx.Component:
                             "Host",
                             SettingsState.settings_ollama_host,
                             SettingsState.set_ollama_host,
-                            "http://localhost:11434",
+                            DEFAULT_OLLAMA_HOST,
                         ),
                         _field(
                             "Model",
@@ -147,13 +147,13 @@ def settings_page() -> rx.Component:
                             "Host",
                             SettingsState.settings_chroma_host,
                             SettingsState.set_chroma_host,
-                            "http://localhost:8000",
+                            DEFAULT_CHROMA_HOST,
                         ),
                         _field(
                             "Collection name",
                             SettingsState.settings_chroma_collection,
                             SettingsState.set_chroma_collection,
-                            "biai_schema",
+                            DEFAULT_CHROMA_COLLECTION,
                         ),
                     ),
 
@@ -165,13 +165,13 @@ def settings_page() -> rx.Component:
                             "Timeout (seconds)",
                             SettingsState.settings_query_timeout,
                             SettingsState.set_query_timeout,
-                            "30",
+                            str(QUERY_TIMEOUT),
                         ),
                         _field(
                             "Row limit",
                             SettingsState.settings_row_limit,
                             SettingsState.set_row_limit,
-                            "10000",
+                            str(ROW_LIMIT),
                         ),
                     ),
 
@@ -206,15 +206,14 @@ def settings_page() -> rx.Component:
                         spacing="3",
                     ),
 
-                    # Status message
-                    rx.cond(
-                        SettingsState.save_message != "",
-                        rx.callout(
-                            SettingsState.save_message,
-                            icon="check",
-                            color_scheme="green",
-                            size="1",
-                        ),
+                    # Status message (CSS display to match sidebar pattern)
+                    rx.callout(
+                        SettingsState.save_message,
+                        icon="check",
+                        color_scheme="green",
+                        size="1",
+                        width="100%",
+                        display=rx.cond(SettingsState.save_message != "", "flex", "none"),
                     ),
 
                     width="100%",

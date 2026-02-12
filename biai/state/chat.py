@@ -43,9 +43,6 @@ class ChatState(rx.State):
     # Cancel streaming
     _cancel_requested: bool = False
 
-    # Error
-    last_error: str = ""
-
     # Schema training flag (lazy: trains on first query)
     _schema_trained: bool = False
 
@@ -260,7 +257,6 @@ class ChatState(rx.State):
                     is_error=True,
                     is_streaming=False,
                 )
-                self.last_error = str(e)
 
         finally:
             async with self:
