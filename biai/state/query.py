@@ -50,17 +50,18 @@ class QueryState(rx.State):
         self.execution_time_ms = 0.0
         self.is_truncated = False
 
-    def prepare_csv_export(self):
-        """Prepare CSV data and trigger download."""
+    @rx.var
+    def csv_data(self) -> str:
+        """Build CSV string from current data for client-side download."""
         if not self.columns or not self.rows:
-            return
+            return ""
         import io
         import csv
         output = io.StringIO()
         writer = csv.writer(output)
         writer.writerow(self.columns)
         writer.writerows(self.rows)
-        return rx.download(data=output.getvalue(), filename="biai_export.csv")
+        return output.getvalue()
 
     @rx.var
     def has_data(self) -> bool:

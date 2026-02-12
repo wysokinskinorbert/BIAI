@@ -25,7 +25,10 @@ def dashboard_panel() -> rx.Component:
                     "CSV",
                     variant="outline",
                     size="1",
-                    on_click=QueryState.prepare_csv_export,
+                    on_click=rx.download(
+                        data=QueryState.csv_data,
+                        filename="biai_export.csv",
+                    ),
                 ),
             ),
             width="100%",
