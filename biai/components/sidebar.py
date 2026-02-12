@@ -24,6 +24,7 @@ def sidebar() -> rx.Component:
                     variant="ghost",
                     size="1",
                     on_click=BaseState.toggle_sidebar,
+                    aria_label="Collapse sidebar",
                 ),
                 width="100%",
                 align="center",

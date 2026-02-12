@@ -75,6 +75,7 @@ def model_selector() -> rx.Component:
                 loading=ModelState.is_loading,
                 variant="ghost",
                 size="2",
+                aria_label="Refresh models",
             ),
             width="100%",
             spacing="2",

@@ -19,6 +19,7 @@ def schema_explorer() -> rx.Component:
                 loading=SchemaState.is_loading,
                 variant="ghost",
                 size="1",
+                aria_label="Refresh schema",
             ),
             width="100%",
             align="center",

@@ -29,6 +29,7 @@ class DBState(rx.State):
 
     def set_db_type(self, value: str):
         self.db_type = value
+        self.connection_error = ""
         if value == "oracle":
             self.port = 1521
         else:
@@ -94,7 +95,7 @@ class DBState(rx.State):
                     self._connector = connector
                 else:
                     self.is_connected = False
-                    self.connection_error = message
+                    self.connection_error = self._friendly_error(message)
                     self._connector = None
 
             # Auto-refresh schema after successful connect
@@ -127,11 +128,29 @@ class DBState(rx.State):
         except Exception as e:
             async with self:
                 self.is_connected = False
-                self.connection_error = str(e)
+                self.connection_error = self._friendly_error(str(e))
                 self._connector = None
         finally:
             async with self:
                 self.is_connecting = False
+
+    @staticmethod
+    def _friendly_error(raw: str) -> str:
+        """Convert raw DB errors to user-friendly messages."""
+        low = raw.lower()
+        if "password authentication failed" in low or "autoryzacja haslem" in low:
+            return "Authentication failed. Check your username and password."
+        if "could not connect to server" in low or "connection refused" in low:
+            return "Cannot connect to the database server. Check host and port."
+        if "does not exist" in low and "database" in low:
+            return "Database not found. Check the database name."
+        if "bequeath" in low or "thick mode" in low:
+            return "Oracle connection requires thick mode driver. Install Oracle Instant Client."
+        if "timeout" in low or "timed out" in low:
+            return "Connection timed out. Check if the database server is running."
+        if "name or service not known" in low or "could not translate host" in low:
+            return "Cannot resolve hostname. Check the host address."
+        return raw
 
     @rx.event(background=True)
     async def disconnect(self):
@@ -180,10 +199,10 @@ class DBState(rx.State):
                     self.connection_error = ""
                     self.server_version = message
                 else:
-                    self.connection_error = message
+                    self.connection_error = self._friendly_error(message)
         except Exception as e:
             async with self:
-                self.connection_error = str(e)
+                self.connection_error = self._friendly_error(str(e))
         finally:
             async with self:
                 self.is_connecting = False

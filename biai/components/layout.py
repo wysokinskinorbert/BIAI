@@ -16,6 +16,20 @@ def main_layout() -> rx.Component:
             rx.cond(
                 BaseState.sidebar_open,
                 sidebar(),
+                # Collapsed: show open button
+                rx.box(
+                    rx.icon_button(
+                        rx.icon("panel-left-open", size=16),
+                        variant="ghost",
+                        size="1",
+                        on_click=BaseState.toggle_sidebar,
+                        aria_label="Open sidebar",
+                    ),
+                    padding="8px",
+                    border_right="1px solid var(--gray-a5)",
+                    height="100vh",
+                    bg="var(--color-panel)",
+                ),
             ),
             # Main content area: split-screen
             rx.hstack(
