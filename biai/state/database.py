@@ -87,6 +87,9 @@ class DBState(rx.State):
 
             success, message = await connector.test_connection()
 
+            if success:
+                await connector.connect()
+
             async with self:
                 if success:
                     self.is_connected = True
@@ -123,6 +126,7 @@ class DBState(rx.State):
                     async with schema_state:
                         schema_state.tables = tables_flat
                         schema_state._tables_full = tables_full
+                        schema_state.schema_error = ""
                 except Exception:
                     pass  # Schema refresh is non-blocking
         except Exception as e:
