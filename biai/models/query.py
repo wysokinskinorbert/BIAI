@@ -28,7 +28,15 @@ class QueryResult(BaseModel):
     def to_dataframe(self) -> pd.DataFrame:
         if not self.rows:
             return pd.DataFrame()
-        return pd.DataFrame(self.rows, columns=self.columns)
+        df = pd.DataFrame(self.rows, columns=self.columns)
+        # Coerce object columns that contain numeric data (e.g. Decimal from PostgreSQL)
+        for col in df.columns:
+            if df[col].dtype == object:
+                try:
+                    df[col] = pd.to_numeric(df[col])
+                except (ValueError, TypeError):
+                    pass
+        return df
 
     def to_csv(self) -> str:
         return self.to_dataframe().to_csv(index=False)

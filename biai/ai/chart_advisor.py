@@ -92,6 +92,15 @@ class ChartAdvisor:
                 title=_generate_title(question),
             )
 
+        # All-numeric columns: use first column as x-axis (ID/label), rest as y
+        if len(num_cols) >= 2:
+            return ChartConfig(
+                chart_type=ChartType.BAR,
+                x_column=num_cols[0],
+                y_columns=num_cols[1:4],
+                title=_generate_title(question),
+            )
+
         # Fallback to table
         return ChartConfig(chart_type=ChartType.TABLE, title=_generate_title(question))
 
