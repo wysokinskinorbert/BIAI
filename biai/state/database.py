@@ -178,6 +178,20 @@ class DBState(rx.State):
         except Exception:
             pass
 
+        # Clear dashboard (query results + chart)
+        try:
+            from biai.state.query import QueryState
+            from biai.state.chart import ChartState
+            async with self:
+                query_state = await self.get_state(QueryState)
+                chart_state = await self.get_state(ChartState)
+            async with query_state:
+                query_state.clear_result()
+            async with chart_state:
+                chart_state.clear_chart()
+        except Exception:
+            pass
+
     @rx.event(background=True)
     async def test_connection(self):
         async with self:

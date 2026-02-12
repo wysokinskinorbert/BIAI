@@ -3,6 +3,8 @@
 import reflex as rx
 
 from biai.state.chat import ChatState
+from biai.state.query import QueryState
+from biai.state.chart import ChartState
 from biai.components.chat_message import chat_message
 
 
@@ -18,7 +20,7 @@ def chat_panel() -> rx.Component:
                 rx.icon("trash-2", size=14),
                 variant="ghost",
                 size="1",
-                on_click=ChatState.clear_chat,
+                on_click=[ChatState.clear_chat, QueryState.clear_result, ChartState.clear_chart],
                 aria_label="Clear chat",
             ),
             width="100%",

@@ -145,13 +145,28 @@ class ChatState(rx.State):
                     )
 
                 # Build chart if recommended
+                async with self:
+                    chart_state = await self.get_state(ChartState)
                 if result.chart_config and result.df is not None:
-                    async with self:
-                        chart_state = await self.get_state(ChartState)
                     plotly_data, plotly_layout = _build_plotly_figure(result.chart_config, result.df)
                     if plotly_data:
                         async with chart_state:
                             chart_state.set_plotly(plotly_data, plotly_layout, result.chart_config.title)
+                    else:
+                        # Chart config existed but figure build failed (e.g. bad column names)
+                        # Try heuristic fallback
+                        from biai.ai.chart_advisor import ChartAdvisor
+                        fallback = ChartAdvisor()._heuristic_recommend(result.df, question)
+                        plotly_data, plotly_layout = _build_plotly_figure(fallback, result.df)
+                        if plotly_data:
+                            async with chart_state:
+                                chart_state.set_plotly(plotly_data, plotly_layout, fallback.title)
+                        else:
+                            async with chart_state:
+                                chart_state.clear_chart()
+                else:
+                    async with chart_state:
+                        chart_state.clear_chart()
 
                 # Stream description
                 description_parts = []

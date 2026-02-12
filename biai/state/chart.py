@@ -8,28 +8,33 @@ import plotly.graph_objects as go
 class ChartState(rx.State):
     """Manages chart configuration and data for the dashboard."""
 
-    # Plotly figure stored as dict (serializable)
-    _plotly_fig_dict: dict[str, Any] = {}
+    # Plotly figure stored as dict (JSON-serializable, must be public for Reflex tracking)
+    plotly_fig_data: dict = {}
     show_plotly: bool = False
 
     # Chart info
     chart_type: str = ""
     chart_title: str = ""
 
+    # Version counter – forces React key change → Plotly component re-mount
+    chart_version: int = 0
+
     # Fullscreen
     is_fullscreen: bool = False
 
     def set_plotly(self, data: list[dict], layout: dict[str, Any], title: str = ""):
-        self._plotly_fig_dict = {"data": data, "layout": layout}
+        self.plotly_fig_data = {"data": data, "layout": layout}
         self.show_plotly = True
         self.chart_type = "plotly"
         self.chart_title = title
+        self.chart_version += 1
 
     def clear_chart(self):
-        self._plotly_fig_dict = {}
+        self.plotly_fig_data = {}
         self.show_plotly = False
         self.chart_type = ""
         self.chart_title = ""
+        self.chart_version += 1
 
     def toggle_fullscreen(self):
         self.is_fullscreen = not self.is_fullscreen
@@ -37,6 +42,6 @@ class ChartState(rx.State):
     @rx.var
     def plotly_figure(self) -> go.Figure:
         """Construct Plotly Figure from stored dict for rendering."""
-        if self._plotly_fig_dict:
-            return go.Figure(self._plotly_fig_dict)
+        if self.plotly_fig_data:
+            return go.Figure(self.plotly_fig_data)
         return go.Figure()

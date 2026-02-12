@@ -23,6 +23,28 @@ class MyVanna(ChromaDB_VectorStore, Ollama):
             ollama_host=config.get("ollama_host", "unknown"),
         )
 
+    def reset_collections(self):
+        """Delete and recreate all ChromaDB collections (fixes corrupted HNSW indices)."""
+        for name in ["documentation", "ddl", "sql"]:
+            try:
+                self.chroma_client.delete_collection(name)
+                logger.info("chromadb_collection_deleted", collection=name)
+            except Exception:
+                pass
+        self.documentation_collection = self.chroma_client.get_or_create_collection(
+            name="documentation",
+            embedding_function=self.embedding_function,
+        )
+        self.ddl_collection = self.chroma_client.get_or_create_collection(
+            name="ddl",
+            embedding_function=self.embedding_function,
+        )
+        self.sql_collection = self.chroma_client.get_or_create_collection(
+            name="sql",
+            embedding_function=self.embedding_function,
+        )
+        logger.info("chromadb_collections_recreated")
+
 
 def create_vanna_client(
     model: str = DEFAULT_MODEL,

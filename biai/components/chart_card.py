@@ -25,11 +25,16 @@ def chart_card() -> rx.Component:
             ),
 
             # Chart container - Plotly
+            # key on both box and plotly forces React to fully re-mount on data change
             rx.cond(
                 ChartState.show_plotly,
                 rx.box(
-                    rx.plotly(data=ChartState.plotly_figure),
+                    rx.plotly(
+                        data=ChartState.plotly_figure,
+                        key=ChartState.chart_version,
+                    ),
                     width="100%",
+                    key=ChartState.chart_version,
                 ),
             ),
 

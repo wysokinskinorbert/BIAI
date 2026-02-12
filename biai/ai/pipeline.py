@@ -101,6 +101,8 @@ class AIPipeline:
 
     async def train_schema(self) -> dict[str, int]:
         """Train Vanna with current database schema."""
+        # Reset collections to avoid corrupted HNSW indices from previous sessions
+        self._vanna.reset_collections()
         snapshot = await self._schema_manager.get_snapshot()
         examples = DialectHelper.get_examples(self._db_type)
         return self._trainer.train_full(schema=snapshot, examples=examples)
