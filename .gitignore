@@ -37,6 +37,9 @@ docker-compose.override.yml
 
 # ChromaDB local
 chroma_data/
+chroma.sqlite3
+# ChromaDB UUID collection dirs
+[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]-*/
 
 # Test
 .pytest_cache/
