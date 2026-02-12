@@ -104,8 +104,10 @@ class AIPipeline:
         # Reset collections to avoid corrupted HNSW indices from previous sessions
         self._vanna.reset_collections()
         snapshot = await self._schema_manager.get_snapshot()
-        examples = DialectHelper.get_examples(self._db_type)
-        return self._trainer.train_full(schema=snapshot, examples=examples)
+        # Generate docs and examples from actual schema (real column names)
+        docs = DialectHelper.get_documentation(snapshot)
+        examples = DialectHelper.get_examples(self._db_type, schema=snapshot)
+        return self._trainer.train_full(schema=snapshot, docs=docs, examples=examples)
 
     async def process(self, question: str) -> PipelineResult:
         """Full pipeline: question → SQL → data → chart config."""

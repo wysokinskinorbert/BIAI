@@ -112,21 +112,49 @@ class OracleConnector(DatabaseConnector):
                 tables = []
                 for tname in table_names:
                     # Get columns
-                    owner_prefix = f"{schema_filter}." if schema_filter != "USER" else ""
-                    cursor.execute(f"""
+                    owner_param = schema_filter if schema_filter != "USER" else None
+                    cursor.execute("""
                         SELECT column_name, data_type, nullable, data_length
                         FROM all_tab_columns
                         WHERE table_name = :tname
                         AND owner = NVL(:owner, USER)
                         ORDER BY column_id
-                    """, tname=tname, owner=schema_filter if schema_filter != "USER" else None)
+                    """, tname=tname, owner=owner_param)
+                    col_rows = cursor.fetchall()
+
+                    # Get primary key columns
+                    pk_query = (
+                        "SELECT cols.column_name "
+                        "FROM user_constraints cons "
+                        "JOIN user_cons_columns cols ON cons.constraint_name = cols.constraint_name "
+                        "WHERE cons.constraint_type = 'P' AND cons.table_name = :tname"
+                    )
+                    cursor.execute(pk_query, tname=tname)
+                    pk_columns = {row[0] for row in cursor.fetchall()}
+
+                    # Get foreign key columns with referenced table
+                    fk_query = (
+                        "SELECT cols.column_name, r_cons.table_name AS ref_table "
+                        "FROM user_constraints cons "
+                        "JOIN user_cons_columns cols "
+                        "  ON cons.constraint_name = cols.constraint_name "
+                        "JOIN user_constraints r_cons "
+                        "  ON cons.r_constraint_name = r_cons.constraint_name "
+                        "WHERE cons.constraint_type = 'R' AND cons.table_name = :tname"
+                    )
+                    cursor.execute(fk_query, tname=tname)
+                    fk_map = {row[0]: row[1] for row in cursor.fetchall()}
 
                     columns = []
-                    for col_row in cursor.fetchall():
+                    for col_row in col_rows:
+                        col_name = col_row[0]
                         columns.append(ColumnInfo(
-                            name=col_row[0],
+                            name=col_name,
                             data_type=f"{col_row[1]}({col_row[3]})" if col_row[3] else col_row[1],
                             nullable=col_row[2] == "Y",
+                            is_primary_key=col_name in pk_columns,
+                            is_foreign_key=col_name in fk_map,
+                            foreign_key_ref=fk_map.get(col_name),
                         ))
 
                     tables.append(TableInfo(

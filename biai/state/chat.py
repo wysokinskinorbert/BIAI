@@ -63,7 +63,6 @@ class ChatState(rx.State):
     def clear_chat(self):
         """Confirmed: clear messages."""
         self.messages = []
-        self.last_error = ""
         self.confirm_clear = False
 
     def cancel_streaming(self):
