@@ -45,32 +45,33 @@ def chat_panel() -> rx.Component:
 
         # Input area
         rx.box(
-            rx.hstack(
-                rx.input(
-                    placeholder="Ask a question about your data...",
-                    value=ChatState.input_value,
-                    on_change=ChatState.set_input,
-                    on_key_down=rx.cond(
-                        rx.Var.create("e.key") == "Enter",
-                        ChatState.process_message,
+            rx.form(
+                rx.hstack(
+                    rx.input(
+                        placeholder="Ask a question about your data...",
+                        name="question",
+                        value=ChatState.input_value,
+                        on_change=ChatState.set_input,
+                        size="3",
+                        width="100%",
+                        disabled=ChatState.is_processing,
                     ),
-                    size="3",
+                    rx.icon_button(
+                        rx.cond(
+                            ChatState.is_processing,
+                            rx.spinner(size="2"),
+                            rx.icon("send-horizontal", size=18),
+                        ),
+                        type="submit",
+                        disabled=ChatState.is_processing,
+                        size="3",
+                    ),
                     width="100%",
-                    disabled=ChatState.is_processing,
+                    spacing="2",
+                    padding="12px 16px",
                 ),
-                rx.icon_button(
-                    rx.cond(
-                        ChatState.is_processing,
-                        rx.spinner(size="2"),
-                        rx.icon("send-horizontal", size=18),
-                    ),
-                    on_click=ChatState.process_message,
-                    disabled=ChatState.is_processing,
-                    size="3",
-                ),
-                width="100%",
-                spacing="2",
-                padding="12px 16px",
+                on_submit=lambda _: ChatState.process_message(),
+                reset_on_submit=False,
             ),
             border_top="1px solid var(--gray-a5)",
             width="100%",

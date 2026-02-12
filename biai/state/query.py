@@ -11,9 +11,9 @@ class QueryState(rx.State):
     sql_dialect: str = ""
     generation_attempts: int = 0
 
-    # Data table
+    # Data table - use list[list[str]] for Reflex foreach compatibility
     columns: list[str] = []
-    rows: list[list] = []
+    rows: list[list[str]] = []
     row_count: int = 0
     execution_time_ms: float = 0.0
     is_truncated: bool = False
@@ -37,7 +37,8 @@ class QueryState(rx.State):
     ):
         self.current_sql = sql
         self.columns = columns
-        self.rows = rows
+        # Convert all values to strings for Reflex foreach compatibility
+        self.rows = [[str(cell) for cell in row] for row in rows]
         self.row_count = row_count
         self.execution_time_ms = execution_time_ms
         self.is_truncated = truncated
@@ -70,7 +71,7 @@ class QueryState(rx.State):
         return len(self.rows) > 0
 
     @rx.var
-    def display_rows(self) -> list[list]:
+    def display_rows(self) -> list[list[str]]:
         """Return rows for display (limited to 100)."""
         return self.rows[:100]
 

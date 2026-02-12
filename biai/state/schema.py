@@ -6,10 +6,10 @@ import reflex as rx
 class SchemaState(rx.State):
     """Manages database schema state for the explorer."""
 
-    # Schema data
-    tables: list[dict] = []
+    # Schema data - use dict[str, str] for Reflex foreach compatibility
+    tables: list[dict[str, str]] = []
     selected_table: str = ""
-    selected_columns: list[dict] = []
+    selected_columns: list[dict[str, str]] = []
 
     # Loading
     is_loading: bool = False
@@ -22,19 +22,26 @@ class SchemaState(rx.State):
         self.search_query = value
 
     def select_table(self, table_name: str):
+        if self.selected_table == table_name:
+            self.selected_table = ""
+            self.selected_columns = []
+            return
         self.selected_table = table_name
-        # Find columns for selected table
-        for table in self.tables:
+        # Find columns for selected table from stored column data
+        for table in self._tables_full:
             if table.get("name") == table_name:
                 self.selected_columns = table.get("columns", [])
                 break
 
     @rx.var
-    def filtered_tables(self) -> list[dict]:
+    def filtered_tables(self) -> list[dict[str, str]]:
         if not self.search_query:
             return self.tables
         q = self.search_query.lower()
         return [t for t in self.tables if q in t.get("name", "").lower()]
+
+    # Internal storage for full table data (columns nested inside)
+    _tables_full: list[dict] = []
 
     @rx.event(background=True)
     async def refresh_schema(self):
@@ -58,26 +65,33 @@ class SchemaState(rx.State):
             manager = SchemaManager(connector)
             snapshot = await manager.get_snapshot(force_refresh=True)
 
-            tables_data = []
+            tables_flat: list[dict[str, str]] = []
+            tables_full: list[dict] = []
+
             for table in snapshot.tables:
                 cols = []
                 for col in table.columns:
                     cols.append({
                         "name": col.name,
                         "data_type": col.data_type,
-                        "nullable": col.nullable,
-                        "is_pk": col.is_primary_key,
-                        "is_fk": col.is_foreign_key,
                     })
-                tables_data.append({
+
+                # Flat version for the table list (foreach-safe)
+                tables_flat.append({
                     "name": table.name,
                     "schema": table.schema_name,
+                    "col_count": str(len(cols)),
+                })
+
+                # Full version with columns (for select_table lookup)
+                tables_full.append({
+                    "name": table.name,
                     "columns": cols,
-                    "col_count": len(cols),
                 })
 
             async with self:
-                self.tables = tables_data
+                self.tables = tables_flat
+                self._tables_full = tables_full
                 self.is_loading = False
         except Exception as e:
             async with self:

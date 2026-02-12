@@ -9,7 +9,7 @@ def chat_message(message: dict) -> rx.Component:
 
     return rx.box(
         rx.hstack(
-            # Avatar
+            # AI Avatar (only for assistant)
             rx.cond(
                 ~is_user,
                 rx.avatar(
@@ -19,7 +19,6 @@ def chat_message(message: dict) -> rx.Component:
                     variant="solid",
                 ),
             ),
-            rx.spacer() if is_user else rx.fragment(),
 
             # Message bubble
             rx.box(
@@ -35,22 +34,16 @@ def chat_message(message: dict) -> rx.Component:
                     rx.markdown(message["content"], size="2"),
                 ),
 
-                # SQL badge (if available)
+                # SQL badge
                 rx.cond(
-                    message["sql"] != None,  # noqa: E711
-                    rx.badge(
-                        rx.icon("code-2", size=12),
-                        "SQL",
-                        variant="surface",
-                        size="1",
-                        cursor="pointer",
-                    ),
-                ),
-
-                # Data indicators
-                rx.hstack(
-                    rx.cond(
-                        message["has_table"],
+                    message["has_table"],
+                    rx.hstack(
+                        rx.badge(
+                            rx.icon("code", size=12),
+                            "SQL",
+                            variant="surface",
+                            size="1",
+                        ),
                         rx.badge(
                             rx.icon("table-2", size=12),
                             "Data",
@@ -58,18 +51,19 @@ def chat_message(message: dict) -> rx.Component:
                             size="1",
                             color_scheme="green",
                         ),
-                    ),
-                    rx.cond(
-                        message["has_chart"],
-                        rx.badge(
-                            rx.icon("bar-chart-3", size=12),
-                            "Chart",
-                            variant="surface",
-                            size="1",
-                            color_scheme="blue",
+                        rx.cond(
+                            message["has_chart"],
+                            rx.badge(
+                                rx.icon("bar-chart-3", size=12),
+                                "Chart",
+                                variant="surface",
+                                size="1",
+                                color_scheme="blue",
+                            ),
                         ),
+                        spacing="1",
+                        padding_top="8px",
                     ),
-                    spacing="1",
                 ),
 
                 padding="12px 16px",
@@ -86,9 +80,7 @@ def chat_message(message: dict) -> rx.Component:
                 ),
             ),
 
-            rx.spacer() if not is_user else rx.fragment(),
-
-            # User avatar
+            # User Avatar (only for user)
             rx.cond(
                 is_user,
                 rx.avatar(
@@ -102,7 +94,7 @@ def chat_message(message: dict) -> rx.Component:
             width="100%",
             spacing="2",
             align="start",
-            justify=rx.cond(is_user, "end", "start"),
+            direction=rx.cond(is_user, "row-reverse", "row"),
         ),
         width="100%",
         padding="4px 0",

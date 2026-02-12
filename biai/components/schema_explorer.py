@@ -53,7 +53,7 @@ def schema_explorer() -> rx.Component:
             rx.text(SchemaState.schema_error, size="1", color="red.11"),
         ),
 
-        # Table list
+        # Table list (flat - no nested foreach)
         rx.cond(
             DBState.is_connected,
             rx.box(
@@ -63,7 +63,32 @@ def schema_explorer() -> rx.Component:
                 ),
                 width="100%",
                 overflow_y="auto",
-                max_height="60vh",
+                max_height="35vh",
+            ),
+        ),
+
+        # Selected table columns (separate section, not nested)
+        rx.cond(
+            SchemaState.selected_table != "",
+            rx.vstack(
+                rx.separator(),
+                rx.hstack(
+                    rx.icon("table-2", size=14, color="var(--accent-9)"),
+                    rx.text(SchemaState.selected_table, size="2", weight="bold"),
+                    align="center",
+                    spacing="2",
+                ),
+                rx.box(
+                    rx.foreach(
+                        SchemaState.selected_columns,
+                        _column_item,
+                    ),
+                    width="100%",
+                    overflow_y="auto",
+                    max_height="25vh",
+                ),
+                width="100%",
+                spacing="2",
             ),
         ),
 
@@ -75,51 +100,28 @@ def schema_explorer() -> rx.Component:
 
 def _table_item(table: dict) -> rx.Component:
     """Single table item in the schema explorer."""
-    return rx.box(
-        rx.hstack(
-            rx.icon("table-2", size=14, color="var(--accent-9)"),
-            rx.text(table["name"], size="2", weight="medium"),
-            rx.spacer(),
-            rx.badge(table["col_count"].to(str), size="1", variant="soft"),
-            width="100%",
-            align="center",
-            cursor="pointer",
-            on_click=SchemaState.select_table(table["name"]),
-        ),
-        # Show columns when selected
-        rx.cond(
-            SchemaState.selected_table == table["name"],
-            rx.box(
-                rx.foreach(
-                    table["columns"],
-                    _column_item,
-                ),
-                padding_left="24px",
-                padding_top="4px",
-            ),
-        ),
+    return rx.hstack(
+        rx.icon("table-2", size=14, color="var(--accent-9)"),
+        rx.text(table["name"], size="2", weight="medium"),
+        rx.spacer(),
+        rx.badge(table["col_count"].to(str), size="1", variant="soft"),
+        width="100%",
+        align="center",
+        cursor="pointer",
         padding="6px 8px",
         border_radius="6px",
         _hover={"bg": "var(--gray-a3)"},
-        width="100%",
+        on_click=SchemaState.select_table(table["name"]),
     )
 
 
 def _column_item(col: dict) -> rx.Component:
     """Single column in the schema explorer."""
     return rx.hstack(
-        rx.cond(
-            col["is_pk"],
-            rx.icon("key", size=12, color="yellow.9"),
-            rx.cond(
-                col["is_fk"],
-                rx.icon("link", size=12, color="blue.9"),
-                rx.icon("columns-3", size=12, color="var(--gray-9)"),
-            ),
-        ),
-        rx.text(col["name"], size="1"),
+        rx.icon("columns-3", size=12, color="var(--gray-9)"),
+        rx.text(col["name"], size="1", weight="medium"),
         rx.text(col["data_type"], size="1", color="var(--gray-11)"),
         spacing="2",
         align="center",
-        padding="2px 0",
+        padding="2px 4px",
     )

@@ -11,7 +11,7 @@ def sql_viewer() -> rx.Component:
         rx.vstack(
             # Header
             rx.hstack(
-                rx.icon("code-2", size=16, color="var(--accent-9)"),
+                rx.icon("code", size=16, color="var(--accent-9)"),
                 rx.text("Generated SQL", size="3", weight="medium"),
                 rx.spacer(),
                 rx.cond(

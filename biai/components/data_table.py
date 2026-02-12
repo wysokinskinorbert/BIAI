@@ -15,7 +15,7 @@ def data_table() -> rx.Component:
                 rx.text("Results", size="3", weight="medium"),
                 rx.spacer(),
                 rx.badge(
-                    f"{QueryState.row_count} rows",
+                    QueryState.row_count.to(str) + " rows",
                     variant="soft",
                     size="1",
                 ),
@@ -72,13 +72,13 @@ def data_table() -> rx.Component:
     )
 
 
-def _table_row(row: list) -> rx.Component:
+def _table_row(row: list[str]) -> rx.Component:
     """Render a single table row."""
     return rx.table.row(
         rx.foreach(
             row,
             lambda cell: rx.table.cell(
-                rx.text(cell.to(str), size="1"),
+                rx.text(cell, size="1"),
             ),
         ),
     )
