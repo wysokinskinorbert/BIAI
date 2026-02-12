@@ -1,10 +1,30 @@
 """Chat state with background streaming."""
 
+import re
+
 import reflex as rx
 
 from biai.state.database import DBState
 from biai.state.query import QueryState
 from biai.state.chart import ChartState
+
+
+def _strip_latex(text: str) -> str:
+    """Strip LaTeX dollar-sign notation from LLM output."""
+    # Remove display math $$...$$
+    text = re.sub(r'\$\$(.+?)\$\$', r'\1', text, flags=re.DOTALL)
+    # Remove inline math $...$ where content has letters (not currency like $100)
+    text = re.sub(r'\$([^$]*[a-zA-Z\\][^$]*)\$', r'\1', text)
+    # Remove LaTeX commands: \text{}, \textbf{}, \mathbf{}, etc.
+    text = re.sub(r'\\(?:text|textbf|textit|mathbf|mathrm|operatorname)\{([^}]*)\}', r'\1', text)
+    # Remove formatting commands
+    text = re.sub(r'\\(?:bf|it|rm|cal)\b\s*', '', text)
+    # Remove spacing commands \, \; \! \quad \qquad
+    text = re.sub(r'\\[,;!]', '', text)
+    text = re.sub(r'\\q?quad\b', ' ', text)
+    # Remove stray backslashes before letters (e.g. \approx → approx)
+    text = re.sub(r'\\([a-zA-Z]+)', r'\1', text)
+    return text
 
 
 class ChatState(rx.State):
@@ -190,7 +210,7 @@ class ChatState(rx.State):
                     description_parts.append(token)
                     async with self:
                         self._update_last_message(
-                            content="".join(description_parts),
+                            content=_strip_latex("".join(description_parts)),
                             sql=result.sql_query.sql,
                             has_chart=result.chart_config is not None,
                             has_table=True,
@@ -199,7 +219,7 @@ class ChatState(rx.State):
 
                 async with self:
                     self._update_last_message(
-                        content="".join(description_parts),
+                        content=_strip_latex("".join(description_parts)),
                         sql=result.sql_query.sql,
                         has_chart=result.chart_config is not None,
                         has_table=True,
