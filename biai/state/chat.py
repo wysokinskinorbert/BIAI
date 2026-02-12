@@ -5,7 +5,6 @@ import reflex as rx
 from biai.state.database import DBState
 from biai.state.query import QueryState
 from biai.state.chart import ChartState
-from biai.state.schema import SchemaState
 
 
 class ChatState(rx.State):
@@ -23,6 +22,9 @@ class ChatState(rx.State):
 
     # Error
     last_error: str = ""
+
+    # Schema training flag (lazy: trains on first query)
+    _schema_trained: bool = False
 
     def set_input(self, value: str):
         self.input_value = value
@@ -65,39 +67,67 @@ class ChatState(rx.State):
             })
 
         try:
-            # Check if in demo mode
-            base_state = await self.get_state(rx.State)
-
-            # Check database connection
+            # Read DB state under its lock
             db_state = await self.get_state(DBState)
+            is_connected = False
+            connector = None
+            db_type_str = ""
+            async with db_state:
+                is_connected = db_state.is_connected
+                connector = db_state._connector
+                db_type_str = db_state.db_type
 
-            if not db_state.is_connected or not db_state._connector:
-                # Demo mode: generate mock response
+            if not is_connected or not connector:
                 async with self:
                     self._update_last_message(
-                        content=_demo_response(question),
+                        content="Nie jesteś połączony z bazą danych. Użyj panelu Connection w sidebarze aby się połączyć.",
+                        is_error=True,
                         is_streaming=False,
                     )
                     self.is_processing = False
                     self.is_streaming = False
                 return
 
-            # Real mode: use AI pipeline
             from biai.ai.pipeline import AIPipeline
             from biai.models.connection import DBType
+            from biai.components.model_selector import ModelState
+
+            # Read model state under its lock
+            model_state = await self.get_state(ModelState)
+            selected_model = ""
+            ollama_host = ""
+            async with model_state:
+                selected_model = model_state.selected_model
+                ollama_host = model_state.ollama_host
 
             pipeline = AIPipeline(
-                connector=db_state._connector,
-                db_type=DBType(db_state.db_type),
+                connector=connector,
+                db_type=DBType(db_type_str),
+                ollama_model=selected_model,
+                ollama_host=ollama_host,
             )
+
+            # Lazy schema training (first query only)
+            schema_trained = False
+            async with self:
+                schema_trained = self._schema_trained
+            if not schema_trained:
+                async with self:
+                    self._update_last_message(content="Training schema... (first query only)")
+                try:
+                    await pipeline.train_schema()
+                except Exception:
+                    pass  # Training failure is non-fatal
+                async with self:
+                    self._schema_trained = True
 
             # Process question
             result = await pipeline.process(question)
 
             if result.success and result.query_result:
-                # Update QueryState
+                # Update QueryState under its own lock
                 query_state = await self.get_state(QueryState)
-                async with self:
+                async with query_state:
                     query_state.set_query_result(
                         sql=result.sql_query.sql,
                         columns=result.query_result.columns,
@@ -112,10 +142,10 @@ class ChatState(rx.State):
                 # Build chart if recommended
                 if result.chart_config and result.df is not None:
                     chart_state = await self.get_state(ChartState)
-                    echarts_opt = _build_echarts_option(result.chart_config, result.df)
-                    if echarts_opt:
-                        async with self:
-                            chart_state.set_echarts(echarts_opt, result.chart_config.title)
+                    plotly_data, plotly_layout = _build_plotly_figure(result.chart_config, result.df)
+                    if plotly_data:
+                        async with chart_state:
+                            chart_state.set_plotly(plotly_data, plotly_layout, result.chart_config.title)
 
                 # Stream description
                 description_parts = []
@@ -179,98 +209,88 @@ class ChatState(rx.State):
             self.messages[-1] = msg
 
 
-def _demo_response(question: str) -> str:
-    """Generate a demo response when no database is connected."""
-    return (
-        f"**Demo Mode** - No database connected.\n\n"
-        f"Your question: *{question}*\n\n"
-        f"Connect to a database (Oracle or PostgreSQL) using the sidebar "
-        f"to get real AI-powered answers with charts and data tables."
-    )
-
-
-def _build_echarts_option(chart_config, df) -> dict:
-    """Build ECharts option from ChartConfig and DataFrame."""
-    from biai.models.chart import ChartType, EChartsOption
-
-    base = EChartsOption.dark_theme_base()
+def _build_plotly_figure(chart_config, df) -> tuple[list[dict], dict]:
+    """Build Plotly figure data from ChartConfig and DataFrame."""
+    from biai.models.chart import ChartType
 
     if chart_config.chart_type == ChartType.TABLE:
-        return {}
+        return [], {}
 
     x_col = chart_config.x_column
     y_cols = chart_config.y_columns
 
     if not x_col or not y_cols:
-        return {}
+        return [], {}
 
     if x_col not in df.columns:
-        return {}
+        return [], {}
 
     x_data = df[x_col].astype(str).tolist()
-
-    option = {
-        **base,
-        "title": {"text": chart_config.title, **base.get("title", {})},
-        "tooltip": {**base.get("tooltip", {}), "trigger": "axis"},
-        "legend": {
-            **base.get("legend", {}),
-            "data": y_cols,
-        },
-        "grid": {"left": "3%", "right": "4%", "bottom": "3%", "containLabel": True},
-    }
+    traces: list[dict] = []
 
     if chart_config.chart_type == ChartType.PIE:
-        # Pie chart
-        pie_data = []
         if y_cols and y_cols[0] in df.columns:
-            for i, row in df.iterrows():
-                pie_data.append({"name": str(row[x_col]), "value": float(row[y_cols[0]])})
-
-        option["series"] = [{
-            "type": "pie",
-            "radius": ["40%", "70%"],
-            "data": pie_data,
-            "emphasis": {
-                "itemStyle": {
-                    "shadowBlur": 10,
-                    "shadowOffsetX": 0,
-                    "shadowColor": "rgba(0, 0, 0, 0.5)",
-                }
-            },
-        }]
-        option.pop("xAxis", None)
-        option.pop("yAxis", None)
-        option.pop("grid", None)
-    else:
-        # Axis-based charts (bar, line, scatter, area)
-        option["xAxis"] = {
-            **base.get("xAxis", {}),
-            "type": "category",
-            "data": x_data,
-        }
-        option["yAxis"] = {**base.get("yAxis", {}), "type": "value"}
-
-        series = []
-        chart_type_map = {
-            ChartType.BAR: "bar",
-            ChartType.LINE: "line",
-            ChartType.SCATTER: "scatter",
-            ChartType.AREA: "line",
-        }
-        echarts_type = chart_type_map.get(chart_config.chart_type, "bar")
-
+            traces.append({
+                "type": "pie",
+                "labels": x_data,
+                "values": df[y_cols[0]].tolist(),
+                "hole": 0.4,
+                "textinfo": "label+percent",
+            })
+    elif chart_config.chart_type == ChartType.SCATTER:
         for y_col in y_cols:
             if y_col in df.columns:
-                s = {
+                traces.append({
+                    "type": "scatter",
+                    "mode": "markers",
+                    "x": x_data,
+                    "y": df[y_col].tolist(),
                     "name": y_col,
-                    "type": echarts_type,
-                    "data": df[y_col].tolist(),
-                }
-                if chart_config.chart_type == ChartType.AREA:
-                    s["areaStyle"] = {"opacity": 0.3}
-                series.append(s)
+                })
+    elif chart_config.chart_type == ChartType.AREA:
+        for y_col in y_cols:
+            if y_col in df.columns:
+                traces.append({
+                    "type": "scatter",
+                    "mode": "lines",
+                    "x": x_data,
+                    "y": df[y_col].tolist(),
+                    "name": y_col,
+                    "fill": "tozeroy",
+                })
+    elif chart_config.chart_type == ChartType.LINE:
+        for y_col in y_cols:
+            if y_col in df.columns:
+                traces.append({
+                    "type": "scatter",
+                    "mode": "lines+markers",
+                    "x": x_data,
+                    "y": df[y_col].tolist(),
+                    "name": y_col,
+                })
+    else:
+        # BAR (default)
+        for y_col in y_cols:
+            if y_col in df.columns:
+                traces.append({
+                    "type": "bar",
+                    "x": x_data,
+                    "y": df[y_col].tolist(),
+                    "name": y_col,
+                })
 
-        option["series"] = series
+    layout = {
+        "title": {"text": chart_config.title},
+        "template": "plotly_dark",
+        "paper_bgcolor": "rgba(0,0,0,0)",
+        "plot_bgcolor": "rgba(0,0,0,0)",
+        "font": {"color": "#e0e0e0"},
+        "margin": {"l": 50, "r": 30, "t": 50, "b": 50},
+        "showlegend": len(traces) > 1,
+    }
 
-    return option
+    if chart_config.chart_type != ChartType.PIE:
+        layout["xaxis"] = {"gridcolor": "#333", "linecolor": "#555"}
+        layout["yaxis"] = {"gridcolor": "#333", "linecolor": "#555"}
+
+    return traces, layout

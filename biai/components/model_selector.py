@@ -2,12 +2,14 @@
 
 import reflex as rx
 
+from biai.config.constants import DEFAULT_MODEL
+
 
 class ModelState(rx.State):
     """State for Ollama model selection."""
 
-    available_models: list[str] = ["qwen2.5-coder:7b-instruct-q4_K_M"]
-    selected_model: str = "qwen2.5-coder:7b-instruct-q4_K_M"
+    available_models: list[str] = [DEFAULT_MODEL]
+    selected_model: str = DEFAULT_MODEL
     ollama_host: str = "http://localhost:11434"
     is_loading: bool = False
     error: str = ""

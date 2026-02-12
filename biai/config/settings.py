@@ -3,6 +3,8 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 
+from biai.config.constants import DEFAULT_MODEL
+
 
 class AppSettings(BaseSettings):
     """Application configuration loaded from environment variables."""
@@ -15,7 +17,7 @@ class AppSettings(BaseSettings):
 
     # Ollama
     ollama_host: str = Field(default="http://localhost:11434")
-    ollama_model: str = Field(default="qwen2.5-coder:7b-instruct-q4_K_M")
+    ollama_model: str = Field(default=DEFAULT_MODEL)
 
     # ChromaDB
     chroma_host: str = Field(default="http://localhost:8000")

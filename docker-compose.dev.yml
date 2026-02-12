@@ -1,0 +1,37 @@
+version: "3.8"
+
+services:
+  oracle-test:
+    image: gvenzl/oracle-xe:21-slim
+    container_name: biai-oracle-test
+    ports:
+      - "1521:1521"
+    environment:
+      ORACLE_PASSWORD: testpass123
+      APP_USER: biai
+      APP_USER_PASSWORD: biai123
+    volumes:
+      - ./scripts/oracle-seed.sql:/container-entrypoint-initdb.d/01-seed.sql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  postgres-test:
+    image: postgres:16
+    container_name: biai-postgres-test
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: biai_test
+      POSTGRES_USER: biai
+      POSTGRES_PASSWORD: biai123
+    volumes:
+      - ./scripts/postgres-seed.sql:/docker-entrypoint-initdb.d/01-seed.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U biai -d biai_test"]
+      interval: 10s
+      timeout: 5s
+      retries: 5

@@ -1,7 +1,9 @@
 """AI Pipeline - orchestrator for the full question-to-answer flow."""
 
+import json
 from typing import AsyncIterator
 
+import httpx
 import pandas as pd
 
 from biai.ai.vanna_client import MyVanna, create_vanna_client
@@ -10,6 +12,7 @@ from biai.ai.self_correction import SelfCorrectionLoop
 from biai.ai.chart_advisor import ChartAdvisor
 from biai.ai.training import SchemaTrainer
 from biai.ai.prompt_templates import DESCRIPTION_PROMPT, SYSTEM_PROMPT, format_dialect_rules
+from biai.config.constants import DEFAULT_MODEL
 from biai.db.base import DatabaseConnector
 from biai.db.dialect import DialectHelper
 from biai.db.schema_manager import SchemaManager
@@ -47,13 +50,15 @@ class AIPipeline:
         self,
         connector: DatabaseConnector,
         db_type: DBType = DBType.POSTGRESQL,
-        ollama_model: str = "qwen2.5-coder:7b-instruct-q4_K_M",
+        ollama_model: str = DEFAULT_MODEL,
         ollama_host: str = "http://localhost:11434",
         chroma_host: str | None = None,
         chroma_collection: str = "biai_schema",
     ):
         self._connector = connector
         self._db_type = db_type
+        self._ollama_host = ollama_host
+        self._ollama_model = ollama_model
 
         # Create Vanna client
         self._vanna = create_vanna_client(
@@ -163,13 +168,29 @@ class AIPipeline:
         )
 
         try:
-            # Vanna's submit_prompt is sync, so we yield the full response
-            response = self._vanna.submit_prompt(prompt)
-            if response:
-                # Simulate streaming by yielding word by word
-                words = response.split(" ")
-                for word in words:
-                    yield word + " "
+            async with httpx.AsyncClient() as client:
+                async with client.stream(
+                    "POST",
+                    f"{self._ollama_host}/api/generate",
+                    json={
+                        "model": self._ollama_model,
+                        "prompt": prompt,
+                        "stream": True,
+                    },
+                    timeout=60.0,
+                ) as resp:
+                    resp.raise_for_status()
+                    async for line in resp.aiter_lines():
+                        if not line.strip():
+                            continue
+                        try:
+                            data = json.loads(line)
+                            if token := data.get("response", ""):
+                                yield token
+                            if data.get("done", False):
+                                break
+                        except json.JSONDecodeError:
+                            continue
         except Exception as e:
             logger.error("description_generation_failed", error=str(e))
             yield f"Could not generate description: {e}"

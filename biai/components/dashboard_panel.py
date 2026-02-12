@@ -42,7 +42,7 @@ def dashboard_panel() -> rx.Component:
                 rx.vstack(
                     # Chart card
                     rx.cond(
-                        ChartState.show_echarts | ChartState.show_plotly,
+                        ChartState.show_plotly,
                         chart_card(),
                     ),
 

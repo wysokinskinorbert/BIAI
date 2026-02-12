@@ -21,9 +21,6 @@ class QueryState(rx.State):
     # Loading
     is_executing: bool = False
 
-    # Export
-    csv_data: str = ""
-
     def set_query_result(
         self,
         sql: str,
@@ -52,10 +49,9 @@ class QueryState(rx.State):
         self.row_count = 0
         self.execution_time_ms = 0.0
         self.is_truncated = False
-        self.csv_data = ""
 
     def prepare_csv_export(self):
-        """Prepare CSV data for download."""
+        """Prepare CSV data and trigger download."""
         if not self.columns or not self.rows:
             return
         import io
@@ -64,7 +60,7 @@ class QueryState(rx.State):
         writer = csv.writer(output)
         writer.writerow(self.columns)
         writer.writerows(self.rows)
-        self.csv_data = output.getvalue()
+        return rx.download(data=output.getvalue(), filename="biai_export.csv")
 
     @rx.var
     def has_data(self) -> bool:

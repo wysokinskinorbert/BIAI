@@ -53,7 +53,9 @@ class SchemaState(rx.State):
 
         try:
             db_state = await self.get_state(DBState)
-            connector = db_state._connector
+            connector = None
+            async with db_state:
+                connector = db_state._connector
 
             if not connector:
                 async with self:

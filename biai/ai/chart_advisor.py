@@ -4,7 +4,7 @@ import json
 
 import pandas as pd
 
-from biai.models.chart import ChartConfig, ChartType, ChartLibrary
+from biai.models.chart import ChartConfig, ChartType
 from biai.ai.prompt_templates import CHART_ADVISOR_PROMPT
 from biai.utils.logger import get_logger
 

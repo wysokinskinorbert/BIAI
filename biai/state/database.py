@@ -96,6 +96,33 @@ class DBState(rx.State):
                     self.is_connected = False
                     self.connection_error = message
                     self._connector = None
+
+            # Auto-refresh schema after successful connect
+            if success:
+                try:
+                    from biai.db.schema_manager import SchemaManager
+                    from biai.state.schema import SchemaState
+
+                    manager = SchemaManager(connector)
+                    snapshot = await manager.get_snapshot(force_refresh=True)
+
+                    schema_state = await self.get_state(SchemaState)
+                    tables_flat: list[dict[str, str]] = []
+                    tables_full: list[dict] = []
+                    for table in snapshot.tables:
+                        cols = [{"name": c.name, "data_type": c.data_type} for c in table.columns]
+                        tables_flat.append({
+                            "name": table.name,
+                            "schema": table.schema_name,
+                            "col_count": str(len(cols)),
+                        })
+                        tables_full.append({"name": table.name, "columns": cols})
+
+                    async with schema_state:
+                        schema_state.tables = tables_flat
+                        schema_state._tables_full = tables_full
+                except Exception:
+                    pass  # Schema refresh is non-blocking
         except Exception as e:
             async with self:
                 self.is_connected = False
@@ -116,6 +143,15 @@ class DBState(rx.State):
             self._connector = None
             self.is_connected = False
             self.server_version = ""
+
+        # Reset schema training flag so next connect retrains
+        try:
+            from biai.state.chat import ChatState
+            chat_state = await self.get_state(ChatState)
+            async with chat_state:
+                chat_state._schema_trained = False
+        except Exception:
+            pass
 
     @rx.event(background=True)
     async def test_connection(self):

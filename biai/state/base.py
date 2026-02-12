@@ -13,9 +13,6 @@ class BaseState(rx.State):
     sidebar_open: bool = True
     sidebar_section: str = "connection"  # connection | schema | settings
 
-    # Demo mode
-    demo_mode: bool = False
-
     # Global loading
     is_loading: bool = False
 
@@ -31,9 +28,6 @@ class BaseState(rx.State):
 
     def set_sidebar_section(self, section: str):
         self.sidebar_section = section
-
-    def toggle_demo_mode(self):
-        self.demo_mode = not self.demo_mode
 
     def show_notification(self, message: str, ntype: str = "info"):
         self.notification = message

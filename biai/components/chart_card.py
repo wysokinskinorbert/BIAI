@@ -1,4 +1,4 @@
-"""Chart card component with ECharts support."""
+"""Chart card component with Plotly rendering."""
 
 import reflex as rx
 
@@ -6,7 +6,7 @@ from biai.state.chart import ChartState
 
 
 def chart_card() -> rx.Component:
-    """Chart card with ECharts/Plotly rendering."""
+    """Chart card with Plotly rendering."""
     return rx.card(
         rx.vstack(
             # Header
@@ -24,20 +24,11 @@ def chart_card() -> rx.Component:
                 align="center",
             ),
 
-            # Chart container
+            # Chart container - Plotly
             rx.cond(
-                ChartState.show_echarts,
+                ChartState.show_plotly,
                 rx.box(
-                    # ECharts placeholder - will be rendered via custom component
-                    rx.el.div(
-                        id="echarts-container",
-                        style={
-                            "width": "100%",
-                            "height": "350px",
-                            "background": "var(--gray-a2)",
-                            "border_radius": "8px",
-                        },
-                    ),
+                    rx.plotly(data=ChartState.plotly_figure),
                     width="100%",
                 ),
             ),

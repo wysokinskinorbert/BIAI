@@ -130,18 +130,6 @@ def _settings_panel() -> rx.Component:
             align="center",
         ),
 
-        # Demo mode toggle
-        rx.hstack(
-            rx.text("Demo mode", size="2"),
-            rx.spacer(),
-            rx.switch(
-                checked=BaseState.demo_mode,
-                on_change=BaseState.toggle_demo_mode,
-            ),
-            width="100%",
-            align="center",
-        ),
-
         width="100%",
         spacing="3",
         padding="8px",
