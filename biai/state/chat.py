@@ -49,12 +49,25 @@ class ChatState(rx.State):
     # Schema training flag (lazy: trains on first query)
     _schema_trained: bool = False
 
+    # Clear chat confirmation
+    confirm_clear: bool = False
+
     def set_input(self, value: str):
         self.input_value = value
 
+    def request_clear_chat(self):
+        """First click: show confirmation."""
+        self.confirm_clear = True
+
+    def cancel_clear_chat(self):
+        """Cancel clear chat."""
+        self.confirm_clear = False
+
     def clear_chat(self):
+        """Confirmed: clear messages."""
         self.messages = []
         self.last_error = ""
+        self.confirm_clear = False
 
     def cancel_streaming(self):
         self._cancel_requested = True

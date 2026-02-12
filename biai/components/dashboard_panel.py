@@ -43,19 +43,21 @@ def dashboard_panel() -> rx.Component:
                 QueryState.has_data,
                 # Has data: show chart + table + SQL
                 rx.vstack(
-                    # Chart card
-                    rx.cond(
-                        ChartState.show_plotly,
+                    # Chart card (always rendered, visibility via CSS to avoid hooks warning)
+                    rx.box(
                         chart_card(),
+                        display=rx.cond(ChartState.show_plotly, "block", "none"),
+                        width="100%",
                     ),
 
                     # Data table
                     data_table(),
 
-                    # SQL viewer
-                    rx.cond(
-                        QueryState.current_sql != "",
+                    # SQL viewer (always rendered, visibility via CSS)
+                    rx.box(
                         sql_viewer(),
+                        display=rx.cond(QueryState.current_sql != "", "block", "none"),
+                        width="100%",
                     ),
 
                     width="100%",

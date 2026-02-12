@@ -16,15 +16,37 @@ def chat_panel() -> rx.Component:
             rx.icon("message-square", size=20, color="var(--accent-9)"),
             rx.text("Chat", size="4", weight="bold"),
             rx.spacer(),
-            rx.tooltip(
-                rx.icon_button(
-                    rx.icon("trash-2", size=14),
-                    variant="ghost",
-                    size="1",
-                    on_click=[ChatState.clear_chat, QueryState.clear_result, ChartState.clear_chart],
-                    aria_label="Clear chat",
+            # Two-step clear: first click shows confirm, second click clears
+            rx.cond(
+                ChatState.confirm_clear,
+                rx.hstack(
+                    rx.icon_button(
+                        rx.icon("check", size=14),
+                        variant="solid",
+                        size="1",
+                        color_scheme="red",
+                        on_click=[ChatState.clear_chat, QueryState.clear_result, ChartState.clear_chart],
+                        aria_label="Confirm clear",
+                    ),
+                    rx.icon_button(
+                        rx.icon("x", size=14),
+                        variant="ghost",
+                        size="1",
+                        on_click=ChatState.cancel_clear_chat,
+                        aria_label="Cancel clear",
+                    ),
+                    spacing="1",
                 ),
-                content="Clear chat",
+                rx.tooltip(
+                    rx.icon_button(
+                        rx.icon("trash-2", size=14),
+                        variant="ghost",
+                        size="1",
+                        on_click=ChatState.request_clear_chat,
+                        aria_label="Clear chat",
+                    ),
+                    content="Clear chat",
+                ),
             ),
             width="100%",
             align="center",

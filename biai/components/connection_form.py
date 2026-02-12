@@ -107,16 +107,14 @@ def connection_form() -> rx.Component:
             spacing="2",
         ),
 
-        # Connection error
-        rx.cond(
-            DBState.connection_error != "",
-            rx.callout(
-                DBState.connection_error,
-                icon="triangle-alert",
-                color_scheme="red",
-                size="1",
-                width="100%",
-            ),
+        # Connection error (CSS display instead of rx.cond to avoid ghost a11y node)
+        rx.callout(
+            DBState.connection_error,
+            icon="triangle-alert",
+            color_scheme="red",
+            size="1",
+            width="100%",
+            display=rx.cond(DBState.connection_error != "", "flex", "none"),
         ),
 
         # Server version
