@@ -20,6 +20,9 @@ class ChatState(rx.State):
     is_streaming: bool = False
     is_processing: bool = False
 
+    # Cancel streaming
+    _cancel_requested: bool = False
+
     # Error
     last_error: str = ""
 
@@ -33,11 +36,15 @@ class ChatState(rx.State):
         self.messages = []
         self.last_error = ""
 
+    def cancel_streaming(self):
+        self._cancel_requested = True
+
     @rx.event(background=True)
     async def process_message(self):
         """Process user message through AI pipeline."""
         question = ""
         async with self:
+            self._cancel_requested = False
             question = self.input_value.strip()
             if not question:
                 return
@@ -175,6 +182,11 @@ class ChatState(rx.State):
                     sql=result.sql_query.sql,
                     df=result.df,
                 ):
+                    cancel = False
+                    async with self:
+                        cancel = self._cancel_requested
+                    if cancel:
+                        break
                     description_parts.append(token)
                     async with self:
                         self._update_last_message(
@@ -221,6 +233,7 @@ class ChatState(rx.State):
             async with self:
                 self.is_processing = False
                 self.is_streaming = False
+                self._cancel_requested = False
 
     def _update_last_message(self, **kwargs):
         """Update the last message in the list."""

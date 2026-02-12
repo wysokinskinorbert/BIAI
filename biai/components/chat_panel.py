@@ -16,12 +16,15 @@ def chat_panel() -> rx.Component:
             rx.icon("message-square", size=20, color="var(--accent-9)"),
             rx.text("Chat", size="4", weight="bold"),
             rx.spacer(),
-            rx.icon_button(
-                rx.icon("trash-2", size=14),
-                variant="ghost",
-                size="1",
-                on_click=[ChatState.clear_chat, QueryState.clear_result, ChartState.clear_chart],
-                aria_label="Clear chat",
+            rx.tooltip(
+                rx.icon_button(
+                    rx.icon("trash-2", size=14),
+                    variant="ghost",
+                    size="1",
+                    on_click=[ChatState.clear_chat, QueryState.clear_result, ChartState.clear_chart],
+                    aria_label="Clear chat",
+                ),
+                content="Clear chat",
             ),
             width="100%",
             align="center",
@@ -44,6 +47,7 @@ def chat_panel() -> rx.Component:
             flex="1",
             overflow_y="auto",
             width="100%",
+            tab_index=-1,
         ),
 
         # Input area
@@ -59,16 +63,34 @@ def chat_panel() -> rx.Component:
                         width="100%",
                         disabled=ChatState.is_processing,
                     ),
-                    rx.icon_button(
-                        rx.cond(
-                            ChatState.is_processing,
-                            rx.spinner(size="2"),
-                            rx.icon("send-horizontal", size=18),
+                    rx.cond(
+                        ChatState.is_streaming,
+                        rx.tooltip(
+                            rx.icon_button(
+                                rx.icon("square", size=18),
+                                type="button",
+                                size="3",
+                                color_scheme="red",
+                                variant="outline",
+                                on_click=ChatState.cancel_streaming,
+                                aria_label="Stop streaming",
+                            ),
+                            content="Stop streaming",
                         ),
-                        type="submit",
-                        disabled=ChatState.is_processing,
-                        size="3",
-                        aria_label="Send message",
+                        rx.tooltip(
+                            rx.icon_button(
+                                rx.cond(
+                                    ChatState.is_processing,
+                                    rx.spinner(size="2"),
+                                    rx.icon("send-horizontal", size=18),
+                                ),
+                                type="submit",
+                                disabled=ChatState.is_processing,
+                                size="3",
+                                aria_label="Send message",
+                            ),
+                            content="Send message",
+                        ),
                     ),
                     width="100%",
                     spacing="2",

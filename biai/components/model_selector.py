@@ -69,13 +69,16 @@ def model_selector() -> rx.Component:
                 size="2",
                 width="100%",
             ),
-            rx.icon_button(
-                rx.icon("refresh-cw", size=14),
-                on_click=ModelState.refresh_models,
-                loading=ModelState.is_loading,
-                variant="ghost",
-                size="2",
-                aria_label="Refresh models",
+            rx.tooltip(
+                rx.icon_button(
+                    rx.icon("refresh-cw", size=14),
+                    on_click=ModelState.refresh_models,
+                    loading=ModelState.is_loading,
+                    variant="ghost",
+                    size="2",
+                    aria_label="Refresh models",
+                ),
+                content="Refresh models",
             ),
             width="100%",
             spacing="2",

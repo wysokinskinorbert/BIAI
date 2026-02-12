@@ -69,6 +69,7 @@ DESCRIPTION_PROMPT = """Based on the query results, provide a brief, insightful 
 {key_points}
 
 Write 2-3 sentences highlighting the key findings. Be specific with numbers. Use business-friendly language.
+Do not use LaTeX, mathematical notation, or dollar signs for formatting. Use plain text only.
 """
 
 

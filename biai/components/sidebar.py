@@ -19,12 +19,15 @@ def sidebar() -> rx.Component:
                 rx.icon("brain-circuit", size=24, color="var(--accent-9)"),
                 rx.heading("BIAI", size="5", weight="bold"),
                 rx.spacer(),
-                rx.icon_button(
-                    rx.icon("panel-left-close", size=16),
-                    variant="ghost",
-                    size="1",
-                    on_click=BaseState.toggle_sidebar,
-                    aria_label="Collapse sidebar",
+                rx.tooltip(
+                    rx.icon_button(
+                        rx.icon("panel-left-close", size=16),
+                        variant="ghost",
+                        size="1",
+                        on_click=BaseState.toggle_sidebar,
+                        aria_label="Collapse sidebar",
+                    ),
+                    content="Collapse sidebar",
                 ),
                 width="100%",
                 align="center",
@@ -67,6 +70,7 @@ def sidebar() -> rx.Component:
                 overflow_y="auto",
                 padding="12px",
                 width="100%",
+                tab_index=-1,
             ),
 
             # Footer: connection status

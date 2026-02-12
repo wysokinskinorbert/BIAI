@@ -28,11 +28,14 @@ def sql_viewer() -> rx.Component:
                     variant="soft",
                     size="1",
                 ),
-                rx.icon_button(
-                    rx.icon("copy", size=14),
-                    variant="ghost",
-                    size="1",
-                    on_click=rx.set_clipboard(QueryState.current_sql),
+                rx.tooltip(
+                    rx.icon_button(
+                        rx.icon("copy", size=14),
+                        variant="ghost",
+                        size="1",
+                        on_click=rx.set_clipboard(QueryState.current_sql),
+                    ),
+                    content="Copy SQL",
                 ),
                 width="100%",
                 align="center",

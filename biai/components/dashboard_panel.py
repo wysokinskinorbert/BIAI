@@ -69,6 +69,7 @@ def dashboard_panel() -> rx.Component:
             flex="1",
             overflow_y="auto",
             width="100%",
+            tab_index=-1,
         ),
 
         width="100%",
