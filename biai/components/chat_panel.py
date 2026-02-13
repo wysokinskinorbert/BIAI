@@ -20,20 +20,26 @@ def chat_panel() -> rx.Component:
             rx.cond(
                 ChatState.confirm_clear,
                 rx.hstack(
-                    rx.icon_button(
-                        rx.icon("check", size=14),
-                        variant="solid",
-                        size="1",
-                        color_scheme="red",
-                        on_click=[ChatState.clear_chat, QueryState.clear_result, ChartState.clear_chart],
-                        aria_label="Confirm clear",
+                    rx.tooltip(
+                        rx.icon_button(
+                            rx.icon("check", size=14),
+                            variant="solid",
+                            size="1",
+                            color_scheme="red",
+                            on_click=[ChatState.clear_chat, QueryState.clear_result, ChartState.clear_chart],
+                            aria_label="Confirm clear",
+                        ),
+                        content="Confirm clear",
                     ),
-                    rx.icon_button(
-                        rx.icon("x", size=14),
-                        variant="ghost",
-                        size="1",
-                        on_click=ChatState.cancel_clear_chat,
-                        aria_label="Cancel clear",
+                    rx.tooltip(
+                        rx.icon_button(
+                            rx.icon("x", size=14),
+                            variant="ghost",
+                            size="1",
+                            on_click=ChatState.cancel_clear_chat,
+                            aria_label="Cancel clear",
+                        ),
+                        content="Cancel",
                     ),
                     spacing="1",
                 ),
@@ -150,9 +156,9 @@ def _empty_state() -> rx.Component:
             ),
             rx.vstack(
                 rx.text("Try asking:", size="2", weight="medium"),
-                _suggestion("Show top 10 customers by revenue"),
-                _suggestion("What are the monthly sales trends?"),
-                _suggestion("Which products have the highest profit margin?"),
+                _suggestion("Show all tables and their row counts"),
+                _suggestion("What are the top 10 most populated tables?"),
+                _suggestion("Show column statistics for the largest table"),
                 spacing="2",
                 width="100%",
                 padding_top="16px",
@@ -174,5 +180,5 @@ def _suggestion(text: str) -> rx.Component:
         variant="outline",
         size="1",
         width="100%",
-        on_click=ChatState.set_input(text),
+        on_click=[ChatState.set_input(text), ChatState.process_message],
     )

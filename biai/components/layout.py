@@ -41,6 +41,7 @@ def main_layout() -> rx.Component:
                     height="100vh",
                     border_right="1px solid var(--gray-a5)",
                     overflow="hidden",
+                    class_name="chat-panel",
                 ),
                 # Dashboard panel (right, 60%)
                 rx.box(
@@ -48,10 +49,12 @@ def main_layout() -> rx.Component:
                     width=DASHBOARD_PANEL_WIDTH,
                     height="100vh",
                     overflow="hidden",
+                    class_name="dashboard-panel",
                 ),
                 width="100%",
                 height="100vh",
                 spacing="0",
+                class_name="main-content",
             ),
             width="100%",
             height="100vh",

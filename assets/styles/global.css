@@ -122,6 +122,39 @@
     }
 }
 
+/* React Flow dark theme overrides */
+.react-flow { background: transparent !important; }
+.react-flow__node { transition: box-shadow 0.3s ease, transform 0.2s ease; }
+.react-flow__node:hover { transform: scale(1.05); z-index: 10 !important; }
+
+.react-flow__minimap {
+    background: var(--gray-a4) !important;
+    border: 1px solid var(--gray-a5);
+    border-radius: 8px;
+}
+
+.react-flow__controls {
+    background: var(--gray-a4) !important;
+    border: 1px solid var(--gray-a5);
+    border-radius: 8px;
+}
+
+.react-flow__controls-button {
+    background: transparent !important;
+    border-color: var(--gray-a5) !important;
+    fill: var(--gray-11) !important;
+}
+
+/* Bottleneck pulse animation */
+@keyframes bottleneck-pulse {
+    0%, 100% { box-shadow: 0 0 8px rgba(239, 68, 68, 0.3); }
+    50% { box-shadow: 0 0 20px rgba(239, 68, 68, 0.6); }
+}
+
+.bottleneck-node {
+    animation: bottleneck-pulse 2s infinite;
+}
+
 /* Code block dark styling */
 .rt-Code {
     background: var(--gray-a3) !important;
@@ -135,4 +168,44 @@
 
 .rt-Card:hover {
     border-color: var(--gray-a6);
+}
+
+/* Focus ring for keyboard navigation (accessibility) */
+.rt-Button:focus-visible,
+.rt-IconButton:focus-visible,
+.rt-SelectTrigger:focus-visible,
+.rt-TextFieldInput:focus-visible {
+    outline: 2px solid var(--accent-8);
+    outline-offset: 2px;
+}
+
+/* Responsive layout */
+@media (max-width: 1024px) {
+    .sidebar {
+        position: fixed;
+        z-index: 50;
+        box-shadow: 4px 0 20px rgba(0, 0, 0, 0.3);
+    }
+    .chat-panel {
+        width: 50% !important;
+    }
+    .dashboard-panel {
+        width: 50% !important;
+    }
+}
+
+@media (max-width: 768px) {
+    .sidebar {
+        width: 100% !important;
+        min-width: 100% !important;
+    }
+    .chat-panel {
+        width: 100% !important;
+    }
+    .dashboard-panel {
+        display: none !important;
+    }
+    .main-content {
+        flex-direction: column !important;
+    }
 }

@@ -46,10 +46,9 @@ def sidebar() -> rx.Component:
             ),
             rx.separator(),
 
-            # Content based on active section
+            # Content based on active section (all rendered, CSS display toggles visibility)
             rx.box(
-                rx.cond(
-                    BaseState.sidebar_section == "connection",
+                rx.box(
                     rx.vstack(
                         connection_form(),
                         rx.separator(),
@@ -57,14 +56,18 @@ def sidebar() -> rx.Component:
                         width="100%",
                         spacing="4",
                     ),
+                    display=rx.cond(BaseState.sidebar_section == "connection", "block", "none"),
+                    width="100%",
                 ),
-                rx.cond(
-                    BaseState.sidebar_section == "schema",
+                rx.box(
                     schema_explorer(),
+                    display=rx.cond(BaseState.sidebar_section == "schema", "block", "none"),
+                    width="100%",
                 ),
-                rx.cond(
-                    BaseState.sidebar_section == "settings",
+                rx.box(
                     _settings_panel(),
+                    display=rx.cond(BaseState.sidebar_section == "settings", "block", "none"),
+                    width="100%",
                 ),
                 flex="1",
                 overflow_y="auto",
@@ -103,6 +106,7 @@ def sidebar() -> rx.Component:
         height="100vh",
         border_right="1px solid var(--gray-a5)",
         bg="var(--color-panel)",
+        class_name="sidebar",
     )
 
 

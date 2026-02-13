@@ -28,6 +28,8 @@ class DBState(rx.State):
     _connector: any = None
 
     def set_db_type(self, value: str):
+        if value == self.db_type:
+            return
         self.db_type = value
         self.connection_error = ""
         if value == "oracle":
@@ -55,6 +57,13 @@ class DBState(rx.State):
 
     def set_dsn(self, value: str):
         self.dsn = value
+
+    @rx.var
+    def can_connect(self) -> bool:
+        """Check if minimum required fields are filled for connection."""
+        if self.dsn:
+            return bool(self.username)
+        return bool(self.host and self.database and self.username)
 
     def _get_config(self) -> ConnectionConfig:
         return ConnectionConfig(
@@ -178,19 +187,12 @@ class DBState(rx.State):
         except Exception:
             pass
 
-        # Clear dashboard (query results + chart) and schema
+        # Clear schema only; keep dashboard data (query results + chart) visible
+        # so the user can still see previous results after disconnect.
         try:
-            from biai.state.query import QueryState
-            from biai.state.chart import ChartState
             from biai.state.schema import SchemaState
             async with self:
-                query_state = await self.get_state(QueryState)
-                chart_state = await self.get_state(ChartState)
                 schema_state = await self.get_state(SchemaState)
-            async with query_state:
-                query_state.clear_result()
-            async with chart_state:
-                chart_state.clear_chart()
             async with schema_state:
                 schema_state.tables = []
                 schema_state._tables_full = []
