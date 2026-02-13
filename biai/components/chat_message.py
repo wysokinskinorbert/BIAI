@@ -48,6 +48,12 @@ def chat_message(message: dict) -> rx.Component:
                     rx.markdown(message["content"], size="2"),
                 ),
 
+                # Multi-step analysis progress (per-message flag)
+                rx.cond(
+                    message["is_multi_step"],
+                    _analysis_steps_section(),
+                ),
+
                 # SQL badge
                 rx.cond(
                     message["has_table"],
@@ -296,4 +302,64 @@ def _story_section() -> rx.Component:
         width="100%",
         spacing="2",
         padding_top="8px",
+    )
+
+
+def _analysis_steps_section() -> rx.Component:
+    """Render multi-step analysis progress."""
+    return rx.vstack(
+        rx.hstack(
+            rx.icon("list-checks", size=14, color="var(--cyan-9)"),
+            rx.text("Analysis Steps", size="2", weight="bold", color="var(--cyan-11)"),
+            spacing="2",
+            align="center",
+        ),
+        rx.foreach(
+            ChatState.analysis_steps,
+            _analysis_step_item,
+        ),
+        width="100%",
+        spacing="1",
+        padding="8px 0",
+        border_bottom="1px solid var(--gray-a3)",
+    )
+
+
+def _analysis_step_item(step: dict) -> rx.Component:
+    """Render a single analysis step with status icon."""
+    return rx.hstack(
+        # Status icon
+        rx.cond(
+            step["status"].to(str) == "completed",
+            rx.icon("circle-check", size=12, color="var(--green-9)"),
+            rx.cond(
+                step["status"].to(str) == "running",
+                rx.spinner(size="1"),
+                rx.cond(
+                    step["status"].to(str) == "failed",
+                    rx.icon("circle-x", size=12, color="var(--red-9)"),
+                    rx.icon("circle", size=12, color="var(--gray-8)"),
+                ),
+            ),
+        ),
+        # Step number + description
+        rx.vstack(
+            rx.hstack(
+                rx.text("Step ", step["step"].to(str), ": ", size="1", weight="bold"),
+                rx.text(step["description"].to(str), size="1"),
+                spacing="0",
+            ),
+            rx.cond(
+                step["result_summary"].to(str) != "",
+                rx.text(
+                    step["result_summary"].to(str),
+                    size="1",
+                    color="var(--gray-9)",
+                ),
+            ),
+            spacing="0",
+        ),
+        spacing="2",
+        align="start",
+        padding="2px 8px",
     )

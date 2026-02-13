@@ -11,6 +11,8 @@ from biai.ai.sql_validator import SQLValidator
 from biai.ai.self_correction import SelfCorrectionLoop
 from biai.ai.chart_advisor import ChartAdvisor
 from biai.ai.training import SchemaTrainer
+from biai.ai.analysis_planner import AnalysisPlanner
+from biai.ai.analysis_executor import AnalysisExecutor, StepResult
 from biai.ai.process_training import has_process_tables, get_process_documentation, get_process_examples
 from biai.ai.process_discovery import ProcessDiscoveryEngine
 from biai.ai.process_cache import ProcessDiscoveryCache
@@ -46,6 +48,8 @@ class PipelineResult:
         self.description: str = ""
         self.errors: list[str] = []
         self.df: pd.DataFrame | None = None
+        self.is_multi_step: bool = False
+        self.analysis_steps: list[dict] = []  # [{step, description, status, result_summary, sql}]
 
     @property
     def success(self) -> bool:
@@ -89,6 +93,12 @@ class AIPipeline:
         self._trainer = SchemaTrainer(self._vanna)
         self._schema_manager = SchemaManager(connector)
         self._query_executor = QueryExecutor(connector)
+        self._planner = AnalysisPlanner(
+            ollama_host=ollama_host, ollama_model=ollama_model,
+        )
+        self._analysis_executor = AnalysisExecutor(
+            self._correction, self._query_executor,
+        )
 
         # Inject dialect rules into Vanna's static documentation
         # This ensures rules are included in every SQL generation prompt
@@ -157,8 +167,18 @@ class AIPipeline:
 
     async def process(
         self, question: str, context: list[dict] | None = None,
+        on_step_update=None,
     ) -> PipelineResult:
-        """Full pipeline: question → SQL → data → chart config."""
+        """Full pipeline: question -> SQL -> data -> chart config.
+
+        For complex questions the planner decomposes them into multiple steps,
+        each executed independently. Simple questions go through the single-step
+        path as before.
+
+        Args:
+            on_step_update: Optional async callback(steps: list[dict]) for live
+                progress updates from multi-step analysis.
+        """
         result = PipelineResult()
         result.question = question
 
@@ -169,6 +189,30 @@ class AIPipeline:
         if context:
             effective_question = self._build_context_question(question, context)
 
+        # Check if multi-step analysis is needed
+        try:
+            schema_snapshot = await self._schema_manager.get_snapshot()
+        except Exception:
+            schema_snapshot = None
+
+        plan = await self._planner.plan(
+            question=effective_question,
+            schema=schema_snapshot,
+            context=context,
+        )
+
+        if plan.is_complex and len(plan.steps) > 1:
+            return await self._process_multi_step(
+                result, question, plan, on_step_update,
+            )
+
+        # --- Single-step path (unchanged) ---
+        return await self._process_single_step(result, effective_question, question)
+
+    async def _process_single_step(
+        self, result: PipelineResult, effective_question: str, original_question: str,
+    ) -> PipelineResult:
+        """Standard single-query pipeline."""
         # Step 1: Generate and validate SQL (with self-correction)
         sql_query, errors = await self._correction.generate_with_correction(
             question=effective_question,
@@ -192,48 +236,8 @@ class AIPipeline:
         result.query_result = exec_result
         result.df = exec_result.to_dataframe()
 
-        # Step 3: Recommend chart
-        if result.df is not None and not result.df.empty:
-            result.chart_config = self._chart_advisor.recommend(
-                question=question,
-                sql=sql_query.sql,
-                df=result.df,
-            )
-
-        # Step 3b: Detect process in results
-        from biai.ai.process_detector import ProcessDetector
-        from biai.ai.process_graph_builder import ProcessGraphBuilder
-        from biai.config.constants import PROCESS_DETECTION_ENABLED
-
-        if PROCESS_DETECTION_ENABLED and result.df is not None and not result.df.empty:
-            detector = ProcessDetector()
-            if detector.detect_in_dataframe(result.df, question):
-                builder = ProcessGraphBuilder()
-                # Use dynamic discovery if available (check cache if not populated yet)
-                discovered_procs = self._discovered_processes
-                if not discovered_procs and USE_DYNAMIC_DISCOVERY:
-                    cached = _discovery_cache.get(self._connector.config)
-                    if cached:
-                        discovered_procs = cached
-                        self._discovered_processes = cached
-                if discovered_procs:
-                    process_type, discovered = detector.detect_process_type_dynamic(
-                        result.df, sql_query.sql, discovered_procs,
-                    )
-                else:
-                    process_type = detector.detect_process_type(result.df, sql_query.sql)
-                    discovered = None
-                result.process_config = builder.build(
-                    result.df, process_type, question, discovered=discovered,
-                )
-                if result.process_config:
-                    logger.info(
-                        "process_detected",
-                        process_type=process_type,
-                        nodes=len(result.process_config.nodes),
-                        edges=len(result.process_config.edges),
-                        dynamic=discovered is not None,
-                    )
+        # Step 3: Recommend chart + detect processes
+        self._post_process(result, original_question)
 
         logger.info(
             "pipeline_success",
@@ -242,6 +246,144 @@ class AIPipeline:
             has_process=result.process_config is not None,
         )
         return result
+
+    async def _process_multi_step(
+        self,
+        result: PipelineResult,
+        original_question: str,
+        plan,
+        on_step_update=None,
+    ) -> PipelineResult:
+        """Execute multi-step analysis plan."""
+        from biai.models.analysis import StepStatus
+
+        result.is_multi_step = True
+        logger.info("pipeline_multi_step", steps=len(plan.steps))
+
+        # Build initial step dicts for UI
+        result.analysis_steps = [
+            {
+                "step": str(s.step),
+                "description": s.description,
+                "status": s.status.value,
+                "result_summary": "",
+                "sql": "",
+            }
+            for s in plan.steps
+        ]
+        if on_step_update:
+            await on_step_update(result.analysis_steps)
+
+        async def _step_callback(idx: int, step):
+            """Relay per-step progress to PipelineResult and caller."""
+            if idx < len(result.analysis_steps):
+                result.analysis_steps[idx]["status"] = str(step.status.value)
+                result.analysis_steps[idx]["result_summary"] = str(step.result_summary or "")
+                result.analysis_steps[idx]["sql"] = str(step.sql or "")
+            if on_step_update:
+                await on_step_update(result.analysis_steps)
+
+        step_results = await self._analysis_executor.execute(
+            plan, on_step_update=_step_callback,
+        )
+
+        # Combine results: use the last successful step as the main result
+        last_good: StepResult | None = None
+        all_dfs: list[pd.DataFrame] = []
+        for sr in step_results:
+            if sr.success:
+                last_good = sr
+                all_dfs.append(sr.df)
+
+        if last_good is not None and last_good.df is not None:
+            # Prefer concatenated DF if multiple steps produced data
+            if len(all_dfs) > 1:
+                try:
+                    combined = pd.concat(all_dfs, ignore_index=True)
+                    result.df = combined
+                except Exception:
+                    result.df = last_good.df
+            else:
+                result.df = last_good.df
+
+            result.sql_query = SQLQuery(
+                sql=last_good.sql,
+                is_valid=True,
+            )
+            # Build a synthetic QueryResult from the DF
+            result.query_result = QueryResult(
+                sql=last_good.sql,
+                columns=list(result.df.columns),
+                rows=[list(row) for _, row in result.df.iterrows()],
+                row_count=len(result.df),
+            )
+
+            # Post-processing (chart, process detection)
+            self._post_process(result, original_question)
+
+            logger.info(
+                "pipeline_multi_step_success",
+                total_steps=len(plan.steps),
+                successful_steps=len(all_dfs),
+                rows=len(result.df),
+            )
+        else:
+            # All steps failed
+            all_errors = [sr.error for sr in step_results if sr.error]
+            result.errors = all_errors or ["All analysis steps failed"]
+            result.sql_query = SQLQuery(sql="", is_valid=False)
+            logger.warning("pipeline_multi_step_all_failed", errors=all_errors)
+
+        return result
+
+    def _post_process(self, result: PipelineResult, question: str) -> None:
+        """Chart recommendation + process detection on a completed result."""
+        if result.df is None or result.df.empty:
+            return
+
+        # Chart recommendation
+        sql = result.sql_query.sql if result.sql_query else ""
+        result.chart_config = self._chart_advisor.recommend(
+            question=question, sql=sql, df=result.df,
+        )
+
+        # Process detection
+        from biai.ai.process_detector import ProcessDetector
+        from biai.ai.process_graph_builder import ProcessGraphBuilder
+        from biai.config.constants import PROCESS_DETECTION_ENABLED
+
+        if not PROCESS_DETECTION_ENABLED:
+            return
+
+        detector = ProcessDetector()
+        if not detector.detect_in_dataframe(result.df, question):
+            return
+
+        builder = ProcessGraphBuilder()
+        discovered_procs = self._discovered_processes
+        if not discovered_procs and USE_DYNAMIC_DISCOVERY:
+            cached = _discovery_cache.get(self._connector.config)
+            if cached:
+                discovered_procs = cached
+                self._discovered_processes = cached
+        if discovered_procs:
+            process_type, discovered = detector.detect_process_type_dynamic(
+                result.df, sql, discovered_procs,
+            )
+        else:
+            process_type = detector.detect_process_type(result.df, sql)
+            discovered = None
+        result.process_config = builder.build(
+            result.df, process_type, question, discovered=discovered,
+        )
+        if result.process_config:
+            logger.info(
+                "process_detected",
+                process_type=process_type,
+                nodes=len(result.process_config.nodes),
+                edges=len(result.process_config.edges),
+                dynamic=discovered is not None,
+            )
 
     @staticmethod
     def _build_context_question(question: str, context: list[dict]) -> str:

@@ -105,7 +105,7 @@ class ChatState(rx.State):
     insights: list[dict[str, str]] = []
 
     # --- Multi-step analysis progress ---
-    analysis_steps: list[dict] = []  # [{step, description, status, result_summary}]
+    analysis_steps: list[dict[str, str]] = []  # [{step, description, status, result_summary, sql}]
     is_multi_step: bool = False
 
     # --- Story mode ---
@@ -193,6 +193,9 @@ class ChatState(rx.State):
             self.input_value = ""
             self.is_processing = True
             self.is_streaming = True
+            self.analysis_steps = []
+            self.is_multi_step = False
+            self.insights = []
 
             # Add placeholder AI message
             self.messages.append(
@@ -263,8 +266,22 @@ class ChatState(rx.State):
             async with self:
                 context = list(self.conversation_context)
 
+            # Callback for multi-step analysis progress
+            async def _on_step_update(steps: list[dict]):
+                async with self:
+                    self.analysis_steps = steps
+                    self.is_multi_step = True
+
             # Process question (with context)
-            result = await pipeline.process(question, context=context)
+            result = await pipeline.process(
+                question, context=context, on_step_update=_on_step_update,
+            )
+
+            # Store multi-step state from result
+            if result.is_multi_step:
+                async with self:
+                    self.analysis_steps = result.analysis_steps
+                    self.is_multi_step = True
 
             if result.success and result.query_result:
                 # get_state must be called inside async with self
@@ -362,6 +379,7 @@ class ChatState(rx.State):
 
                 # Stream description
                 description_parts = []
+                _is_multi = result.is_multi_step
                 async for token in pipeline.generate_description(
                     question=question,
                     sql=result.sql_query.sql,
@@ -381,6 +399,7 @@ class ChatState(rx.State):
                             has_table=True,
                             has_process=has_process,
                             is_streaming=True,
+                            is_multi_step=_is_multi,
                         )
 
                 async with self:
@@ -391,6 +410,7 @@ class ChatState(rx.State):
                         has_table=True,
                         has_process=has_process,
                         is_streaming=False,
+                        is_multi_step=_is_multi,
                     )
                     # Generate drill-down suggestions
                     self.suggested_queries = _generate_suggestions(

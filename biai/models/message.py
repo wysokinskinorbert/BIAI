@@ -18,4 +18,5 @@ class ChatMessage(BaseModel):
     has_process: bool = False
     is_error: bool = False
     is_streaming: bool = False
+    is_multi_step: bool = False
     question: str = ""  # original user question (for save/bookmark feature)
