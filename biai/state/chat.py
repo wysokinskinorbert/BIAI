@@ -37,6 +37,41 @@ def _make_message(**kwargs) -> dict:
     return ChatMessage(**kwargs).model_dump()
 
 
+def _generate_suggestions(question: str, columns: list[str], row_count: int) -> list[str]:
+    """Generate follow-up query suggestions based on current result."""
+    suggestions = []
+    q_lower = question.lower()
+    col_names = [c.lower() for c in columns]
+
+    # Time-based drill-down
+    time_words = {"month", "year", "daily", "weekly", "trend", "monthly"}
+    if any(w in q_lower for w in time_words):
+        suggestions.append("Show this data broken down by quarter")
+
+    # If showing aggregated data, suggest details
+    agg_words = {"total", "count", "average", "sum", "avg", "mean"}
+    if any(w in q_lower for w in agg_words):
+        suggestions.append("Show the top 10 individual records for this data")
+
+    # If showing by category, suggest trend
+    cat_words = {"by", "per", "wg", "według", "dla", "each"}
+    if any(w in q_lower for w in cat_words) and row_count > 1:
+        suggestions.append("Show the trend over time for this data")
+
+    # If few rows, suggest broader view
+    if row_count <= 5:
+        suggestions.append("Show all records related to this query")
+    elif row_count > 20:
+        suggestions.append("Show only the top 5 results")
+
+    # Process-related suggestions
+    process_words = {"process", "flow", "etap", "stage", "pipeline", "status"}
+    if any(w in q_lower for w in process_words):
+        suggestions.append("What are the bottlenecks in this process?")
+
+    return suggestions[:3]
+
+
 class ChatState(rx.State):
     """Manages chat messages and AI interaction."""
 
@@ -59,6 +94,9 @@ class ChatState(rx.State):
     # Clear chat confirmation
     confirm_clear: bool = False
 
+    # Suggested follow-up queries (drill-down)
+    suggested_queries: list[str] = []
+
     def set_input(self, value: str):
         self.input_value = value
 
@@ -77,6 +115,12 @@ class ChatState(rx.State):
 
     def cancel_streaming(self):
         self._cancel_requested = True
+
+    def run_suggested_query(self, query: str):
+        """Set suggested query as input and process it."""
+        self.input_value = query
+        self.suggested_queries = []
+        return ChatState.process_message
 
     @rx.event(background=True)
     async def process_message(self):
@@ -97,7 +141,7 @@ class ChatState(rx.State):
 
             # Add placeholder AI message
             self.messages.append(
-                _make_message(content="Analyzing your question...", is_streaming=True)
+                _make_message(content="Analyzing your question...", is_streaming=True, question=question)
             )
 
         try:
@@ -190,7 +234,7 @@ class ChatState(rx.State):
                         echarts_opt = build_echarts_option(cfg, result.df)
                         if echarts_opt:
                             async with chart_state:
-                                chart_state.set_echarts(echarts_opt, cfg.title)
+                                chart_state.set_echarts(echarts_opt, cfg.title, len(result.df))
                             chart_built = True
 
                     # Fallback to Plotly
@@ -209,7 +253,7 @@ class ChatState(rx.State):
                             echarts_opt = build_echarts_option(fallback, result.df)
                             if echarts_opt:
                                 async with chart_state:
-                                    chart_state.set_echarts(echarts_opt, fallback.title)
+                                    chart_state.set_echarts(echarts_opt, fallback.title, len(result.df))
                                 chart_built = True
                         if not chart_built:
                             plotly_data, plotly_layout = build_plotly_figure(fallback, result.df)
@@ -284,6 +328,12 @@ class ChatState(rx.State):
                         has_table=True,
                         has_process=has_process,
                         is_streaming=False,
+                    )
+                    # Generate drill-down suggestions
+                    self.suggested_queries = _generate_suggestions(
+                        question,
+                        result.query_result.columns,
+                        result.query_result.row_count,
                     )
             else:
                 # SQL generation or execution failed

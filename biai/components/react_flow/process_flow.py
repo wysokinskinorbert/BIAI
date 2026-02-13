@@ -104,7 +104,7 @@ def process_flow_card() -> rx.Component:
                 ),
             ),
             width="100%",
-            height="400px",
+            height=ProcessState.flow_height,
             border_radius="8px",
             overflow="hidden",
             class_name=ProcessState.animation_class,

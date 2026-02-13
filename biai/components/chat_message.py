@@ -2,6 +2,9 @@
 
 import reflex as rx
 
+from biai.state.chat import ChatState
+from biai.state.saved_queries import SavedQueriesState
+
 
 def chat_message(message: dict) -> rx.Component:
     """Render a single chat message bubble."""
@@ -22,6 +25,17 @@ def chat_message(message: dict) -> rx.Component:
 
             # Message bubble
             rx.box(
+                # Error indicator icon
+                rx.cond(
+                    message["is_error"],
+                    rx.hstack(
+                        rx.icon("alert-triangle", size=16, color="var(--red-9)"),
+                        rx.text("Error", size="2", weight="bold", color="var(--red-11)"),
+                        spacing="1",
+                        align="center",
+                        padding_bottom="4px",
+                    ),
+                ),
                 # Content
                 rx.cond(
                     message["is_streaming"],
@@ -71,8 +85,36 @@ def chat_message(message: dict) -> rx.Component:
                                 color_scheme="purple",
                             ),
                         ),
+                        # Save query button (only for completed AI responses with data)
+                        rx.cond(
+                            (message["question"] != "") & (~message["is_streaming"]),
+                            rx.tooltip(
+                                rx.icon_button(
+                                    rx.icon("bookmark-plus", size=12),
+                                    variant="ghost",
+                                    size="1",
+                                    on_click=SavedQueriesState.save_current_query(message["question"]),
+                                    cursor="pointer",
+                                ),
+                                content="Save query",
+                            ),
+                        ),
                         spacing="1",
                         padding_top="8px",
+                    ),
+                ),
+
+                # Retry button for errors
+                rx.cond(
+                    message["is_error"] & (message["question"] != ""),
+                    rx.button(
+                        rx.icon("refresh-cw", size=12),
+                        "Retry",
+                        variant="outline",
+                        size="1",
+                        color_scheme="red",
+                        on_click=ChatState.run_suggested_query(message["question"]),
+                        margin_top="8px",
                     ),
                 ),
 

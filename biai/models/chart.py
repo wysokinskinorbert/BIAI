@@ -12,6 +12,9 @@ class ChartType(str, Enum):
     SCATTER = "scatter"
     AREA = "area"
     HEATMAP = "heatmap"
+    GAUGE = "gauge"
+    FUNNEL = "funnel"
+    WATERFALL = "waterfall"
     TABLE = "table"  # fallback: no chart, just table
     PROCESS_FLOW = "process_flow"
     TIMELINE = "timeline"
@@ -32,7 +35,8 @@ class ChartConfig(BaseModel):
     y_columns: list[str] = Field(default_factory=list)
     group_column: str | None = None
     show_legend: bool = True
-    show_labels: bool = False
+    show_labels: bool = True
+    horizontal: bool = False
     engine: ChartEngine = ChartEngine.ECHARTS
 
 

@@ -5,6 +5,7 @@ import reflex as rx
 from biai.state.chat import ChatState
 from biai.state.query import QueryState
 from biai.state.chart import ChartState
+from biai.state.saved_queries import SavedQueriesState
 from biai.components.chat_message import chat_message
 
 
@@ -16,6 +17,17 @@ def chat_panel() -> rx.Component:
             rx.icon("message-square", size=20, color="var(--accent-9)"),
             rx.text("Chat", size="4", weight="bold"),
             rx.spacer(),
+            # Saved queries button
+            rx.tooltip(
+                rx.icon_button(
+                    rx.icon("bookmark", size=14),
+                    variant="ghost",
+                    size="1",
+                    on_click=[SavedQueriesState.load_saved_queries, SavedQueriesState.toggle_saved_panel],
+                    aria_label="Saved queries",
+                ),
+                content="Saved queries",
+            ),
             # Two-step clear: first click shows confirm, second click clears
             rx.cond(
                 ChatState.confirm_clear,
@@ -60,6 +72,47 @@ def chat_panel() -> rx.Component:
             border_bottom="1px solid var(--gray-a5)",
         ),
 
+        # Saved queries panel (collapsible)
+        rx.cond(
+            SavedQueriesState.show_saved_panel,
+            rx.box(
+                rx.vstack(
+                    rx.hstack(
+                        rx.icon("bookmark", size=14, color="var(--accent-9)"),
+                        rx.text("Saved Queries", size="2", weight="medium"),
+                        rx.spacer(),
+                        rx.icon_button(
+                            rx.icon("x", size=12),
+                            variant="ghost",
+                            size="1",
+                            on_click=SavedQueriesState.toggle_saved_panel,
+                        ),
+                        width="100%",
+                        align="center",
+                    ),
+                    rx.cond(
+                        SavedQueriesState.has_saved,
+                        rx.vstack(
+                            rx.foreach(
+                                SavedQueriesState.saved_queries,
+                                _saved_query_item,
+                            ),
+                            spacing="1",
+                            width="100%",
+                            max_height="200px",
+                            overflow_y="auto",
+                        ),
+                        rx.text("No saved queries yet", size="1", color="var(--gray-9)"),
+                    ),
+                    spacing="2",
+                    width="100%",
+                ),
+                padding="8px 16px",
+                border_bottom="1px solid var(--gray-a5)",
+                background="var(--gray-a2)",
+            ),
+        ),
+
         # Message list
         rx.box(
             rx.cond(
@@ -76,6 +129,29 @@ def chat_panel() -> rx.Component:
             overflow_y="auto",
             width="100%",
             tab_index=-1,
+        ),
+
+        # Suggested follow-up queries (drill-down)
+        rx.cond(
+            ChatState.suggested_queries.length() > 0,
+            rx.box(
+                rx.hstack(
+                    rx.icon("lightbulb", size=12, color="var(--accent-9)"),
+                    rx.text("Follow-up:", size="1", color="var(--gray-10)", weight="medium"),
+                    spacing="1",
+                    align="center",
+                ),
+                rx.hstack(
+                    rx.foreach(
+                        ChatState.suggested_queries,
+                        _followup_chip,
+                    ),
+                    spacing="1",
+                    flex_wrap="wrap",
+                ),
+                padding="6px 16px",
+                border_top="1px solid var(--gray-a3)",
+            ),
         ),
 
         # Input area
@@ -169,6 +245,47 @@ def _empty_state() -> rx.Component:
         ),
         width="100%",
         height="100%",
+    )
+
+
+def _saved_query_item(query: rx.Var[dict]) -> rx.Component:
+    """Render a saved query item."""
+    return rx.hstack(
+        rx.button(
+            rx.icon("play", size=10),
+            query["question"],
+            variant="ghost",
+            size="1",
+            on_click=SavedQueriesState.run_saved_query(query["question"]),
+            cursor="pointer",
+            flex="1",
+            justify_content="flex-start",
+            overflow="hidden",
+            text_overflow="ellipsis",
+            white_space="nowrap",
+        ),
+        rx.icon_button(
+            rx.icon("trash-2", size=10),
+            variant="ghost",
+            size="1",
+            color_scheme="red",
+            on_click=SavedQueriesState.delete_saved_query(query["id"]),
+        ),
+        width="100%",
+        align="center",
+        spacing="1",
+    )
+
+
+def _followup_chip(query: rx.Var[str]) -> rx.Component:
+    """Clickable follow-up query suggestion."""
+    return rx.button(
+        rx.icon("arrow-right", size=10),
+        query,
+        variant="soft",
+        size="1",
+        on_click=ChatState.run_suggested_query(query),
+        cursor="pointer",
     )
 
 

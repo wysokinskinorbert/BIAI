@@ -126,6 +126,18 @@ class ProcessState(rx.State):
         return len(self.prev_flow_nodes) > 0
 
     @rx.var
+    def flow_height(self) -> str:
+        """Dynamic height based on node count."""
+        n = len(self.flow_nodes)
+        if n <= 3:
+            return "250px"
+        if n <= 6:
+            return "350px"
+        if n <= 10:
+            return "420px"
+        return "500px"
+
+    @rx.var
     def animation_class(self) -> str:
         return "animated-tokens" if self.show_animation else ""
 

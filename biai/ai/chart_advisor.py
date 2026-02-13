@@ -45,6 +45,10 @@ class ChartAdvisor:
         if df.empty or len(df.columns) < 2:
             return ChartConfig(chart_type=ChartType.TABLE)
 
+        # Single-row results → TABLE (KPI-style display is better than a lone bar)
+        if len(df) == 1:
+            return ChartConfig(chart_type=ChartType.TABLE, title=_generate_title(question))
+
         question_lower = question.lower()
         num_cols = df.select_dtypes(include=["number"]).columns.tolist()
         cat_cols = df.select_dtypes(exclude=["number"]).columns.tolist()
@@ -86,13 +90,50 @@ class ChartAdvisor:
                 title=_generate_title(question),
             )
 
-        # Proportion detection
-        proportion_keywords = ["percentage", "share", "distribution", "breakdown", "proportion"]
+        # Waterfall for breakdown/contribution data (before proportion — "breakdown" overlap)
+        waterfall_keywords = [
+            "breakdown", "contribution", "waterfall", "składniki", "rozkład kosztów",
+            "decomposition", "revenue breakdown", "cost breakdown",
+        ]
+        # Skip waterfall if question also has proportion words (e.g. "percentage breakdown")
+        proportion_override = {"percentage", "share", "proportion", "procentowy", "udzial", "pie"}
+        is_waterfall = (
+            any(kw in question_lower for kw in waterfall_keywords)
+            and not any(pw in question_lower for pw in proportion_override)
+        )
+        if is_waterfall and cat_cols and num_cols and 3 <= len(df) <= 15:
+            return ChartConfig(
+                chart_type=ChartType.WATERFALL,
+                x_column=cat_cols[0],
+                y_columns=[num_cols[0]],
+                title=_generate_title(question),
+            )
+
+        # Proportion detection (EN + PL keywords)
+        proportion_keywords = [
+            "percentage", "share", "distribution", "proportion",
+            "procentowy", "udzial", "rozklad", "dystrybucja", "proporcj",
+            "pie", "kolowy", "udzial procentowy",
+        ]
         is_proportion = any(kw in question_lower for kw in proportion_keywords)
 
         if is_proportion and cat_cols and num_cols and len(df) <= 10:
             return ChartConfig(
                 chart_type=ChartType.PIE,
+                x_column=cat_cols[0],
+                y_columns=[num_cols[0]],
+                title=_generate_title(question),
+            )
+
+        # Funnel detection (sales funnel, pipeline stages)
+        funnel_keywords = [
+            "funnel", "lejek", "pipeline", "conversion", "konwersj",
+            "etap", "stage", "lejku",
+        ]
+        is_funnel = any(kw in question_lower for kw in funnel_keywords)
+        if is_funnel and cat_cols and num_cols and 3 <= len(df) <= 12:
+            return ChartConfig(
+                chart_type=ChartType.FUNNEL,
                 x_column=cat_cols[0],
                 y_columns=[num_cols[0]],
                 title=_generate_title(question),
@@ -107,13 +148,21 @@ class ChartAdvisor:
                 title=_generate_title(question),
             )
 
-        # Heatmap: 2+ categorical + 1 numeric, matrix-like data
-        heatmap_keywords = ["heatmap", "matrix", "correlation", "cross-tab", "pivot"]
+        # Heatmap: 2+ categorical + 1 numeric, or auto-detect cross-tab data
+        heatmap_keywords = [
+            "heatmap", "matrix", "correlation", "cross-tab", "pivot",
+            "macierz", "krzyżow", "po kategorii i",
+        ]
+        # Also auto-detect: 2 cat cols + 1 num col + many combinations
+        auto_heatmap = (
+            len(cat_cols) >= 2 and len(num_cols) >= 1 and len(df) > 6
+            and df[cat_cols[0]].nunique() >= 3 and df[cat_cols[1]].nunique() >= 3
+        )
         if (
             len(cat_cols) >= 2
             and len(num_cols) >= 1
             and len(df) > 3
-            and any(kw in question_lower for kw in heatmap_keywords)
+            and (any(kw in question_lower for kw in heatmap_keywords) or auto_heatmap)
         ):
             return ChartConfig(
                 chart_type=ChartType.HEATMAP,
@@ -140,8 +189,11 @@ class ChartAdvisor:
                 title=_generate_title(question),
             )
 
-        # Sankey: flow/funnel with source -> target -> value
-        sankey_keywords = ["flow", "funnel", "transition", "from to", "sankey"]
+        # Sankey: flow with source -> target -> value
+        sankey_keywords = [
+            "sankey", "flow between", "transition", "from to", "przepływ",
+            "przejsci", "transitions between", "source target",
+        ]
         if any(kw in question_lower for kw in sankey_keywords) and len(df.columns) >= 3:
             return ChartConfig(
                 chart_type=ChartType.SANKEY,
@@ -149,6 +201,21 @@ class ChartAdvisor:
                 y_columns=[df.columns[1], df.columns[2]],
                 title=_generate_title(question),
             )
+
+        # Grouped bar: 2 categorical + 1 numeric with manageable groups
+        if len(cat_cols) >= 2 and num_cols:
+            primary_cat = cat_cols[0]
+            group_cat = cat_cols[1]
+            val_col = num_cols[0]
+            n_groups = df[group_cat].nunique()
+            if 2 <= n_groups <= 8:
+                return ChartConfig(
+                    chart_type=ChartType.BAR,
+                    x_column=primary_cat,
+                    y_columns=[val_col],
+                    group_column=group_cat,
+                    title=_generate_title(question),
+                )
 
         # Default: bar chart (categories + numbers)
         if cat_cols and num_cols:
@@ -159,6 +226,7 @@ class ChartAdvisor:
                     chart_type=ChartType.BAR,
                     x_column=x_col,
                     y_columns=y_cols,
+                    horizontal=len(df) > 10,
                     title=_generate_title(question),
                 )
 

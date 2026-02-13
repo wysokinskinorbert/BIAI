@@ -22,6 +22,7 @@ class ChartState(rx.State):
 
     # Chart info
     chart_title: str = ""
+    data_row_count: int = 0
 
     # Version counter – forces React key change → component re-mount
     chart_version: int = 0
@@ -37,12 +38,13 @@ class ChartState(rx.State):
         self.chart_title = title
         self.chart_version += 1
 
-    def set_echarts(self, option: dict, title: str = ""):
+    def set_echarts(self, option: dict, title: str = "", row_count: int = 0):
         self.echarts_option = option
         self.show_echarts = True
         self.show_plotly = False
         self.chart_engine = "echarts"
         self.chart_title = title
+        self.data_row_count = row_count
         self.chart_version += 1
 
     def clear_chart(self):
@@ -60,6 +62,18 @@ class ChartState(rx.State):
     @rx.var
     def has_chart(self) -> bool:
         return self.show_plotly or self.show_echarts
+
+    @rx.var
+    def chart_height(self) -> str:
+        """Dynamic chart height based on data complexity."""
+        n = self.data_row_count
+        if n <= 3:
+            return "250px"
+        if n <= 8:
+            return "320px"
+        if n <= 15:
+            return "380px"
+        return "450px"
 
     @rx.var
     def plotly_figure(self) -> go.Figure:

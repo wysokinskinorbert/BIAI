@@ -1,4 +1,4 @@
-"""SQL viewer component with syntax display."""
+"""SQL viewer component with collapsible display."""
 
 import reflex as rx
 
@@ -6,21 +6,24 @@ from biai.state.query import QueryState
 
 
 def sql_viewer() -> rx.Component:
-    """SQL viewer with syntax highlighting style."""
+    """SQL viewer with syntax highlighting, collapsed by default."""
     return rx.card(
         rx.vstack(
-            # Header
+            # Header (always visible, clickable to toggle)
             rx.hstack(
                 rx.icon("code", size=16, color="var(--accent-9)"),
                 rx.text("Generated SQL", size="3", weight="medium"),
                 rx.spacer(),
                 rx.cond(
                     QueryState.generation_attempts > 1,
-                    rx.badge(
-                        f"Attempt {QueryState.generation_attempts}",
-                        variant="soft",
-                        size="1",
-                        color_scheme="orange",
+                    rx.tooltip(
+                        rx.badge(
+                            f"Attempt {QueryState.generation_attempts}",
+                            variant="soft",
+                            size="1",
+                            color_scheme="orange",
+                        ),
+                        content="AI needed multiple attempts to generate valid SQL",
                     ),
                 ),
                 rx.badge(
@@ -38,16 +41,31 @@ def sql_viewer() -> rx.Component:
                     ),
                     content="Copy SQL",
                 ),
+                rx.icon_button(
+                    rx.cond(
+                        QueryState.sql_expanded,
+                        rx.icon("chevron-up", size=14),
+                        rx.icon("chevron-down", size=14),
+                    ),
+                    variant="ghost",
+                    size="1",
+                    on_click=QueryState.toggle_sql_expanded,
+                ),
                 width="100%",
                 align="center",
+                cursor="pointer",
+                on_click=QueryState.toggle_sql_expanded,
             ),
 
-            # SQL code block
-            rx.code_block(
-                QueryState.current_sql,
-                language="sql",
-                show_line_numbers=True,
-                width="100%",
+            # SQL code block (collapsible)
+            rx.cond(
+                QueryState.sql_expanded,
+                rx.code_block(
+                    QueryState.current_sql,
+                    language="sql",
+                    show_line_numbers=True,
+                    width="100%",
+                ),
             ),
 
             width="100%",

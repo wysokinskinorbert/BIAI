@@ -14,7 +14,18 @@ def chart_card() -> rx.Component:
                 # Header
                 rx.hstack(
                     rx.icon("bar-chart-3", size=16, color="var(--accent-9)"),
-                    rx.text(ChartState.chart_title, size="3", weight="medium"),
+                    rx.tooltip(
+                        rx.text(
+                            ChartState.chart_title,
+                            size="3",
+                            weight="medium",
+                            overflow="hidden",
+                            text_overflow="ellipsis",
+                            white_space="nowrap",
+                            max_width="300px",
+                        ),
+                        content=ChartState.chart_title,
+                    ),
                     rx.spacer(),
                     # Engine badge
                     rx.badge(
@@ -36,14 +47,14 @@ def chart_card() -> rx.Component:
                     align="center",
                 ),
 
-                # ECharts container (dimensions on wrapper box; ECharts fills parent)
+                # ECharts container (dynamic height based on data)
                 rx.box(
                     echarts_component(
                         option=ChartState.echarts_option,
                         not_merge=True,
                     ),
                     width="100%",
-                    height="350px",
+                    height=ChartState.chart_height,
                     display=rx.cond(ChartState.show_echarts, "block", "none"),
                     key=ChartState.chart_version,
                 ),
