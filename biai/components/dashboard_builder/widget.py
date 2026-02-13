@@ -29,9 +29,19 @@ def dashboard_widget(widget: dict) -> rx.Component:
                     rx.badge(widget["widget_type"], size="1", variant="surface"),
                     rx.tooltip(
                         rx.icon_button(
+                            rx.icon("settings", size=12),
+                            variant="ghost",
+                            size="1",
+                            on_click=DashboardState.start_edit_widget(widget["id"]),
+                        ),
+                        content="Edit widget",
+                    ),
+                    rx.tooltip(
+                        rx.icon_button(
                             rx.icon("x", size=12),
                             variant="ghost",
                             size="1",
+                            color_scheme="red",
                             on_click=DashboardState.remove_widget(widget["id"]),
                         ),
                         content="Remove widget",

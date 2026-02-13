@@ -2,7 +2,7 @@
 
 import reflex as rx
 
-from biai.state.dashboard import DashboardState
+from biai.state.dashboard import DashboardState, DASHBOARD_TEMPLATES
 from biai.components.dashboard_builder.grid_layout import dashboard_grid
 from biai.components.dashboard_builder.widget import dashboard_widget
 
@@ -56,6 +56,18 @@ def dashboard_builder_page() -> rx.Component:
         rx.cond(
             DashboardState.show_save_dialog,
             _save_dialog(),
+        ),
+
+        # Widget edit dialog
+        rx.cond(
+            DashboardState.is_editing,
+            _edit_widget_dialog(),
+        ),
+
+        # Template picker dialog
+        rx.cond(
+            DashboardState.show_template_picker,
+            _template_picker_dialog(),
         ),
 
         width="100%",
@@ -133,6 +145,14 @@ def _toolbar() -> rx.Component:
                 ),
             ),
         ),
+        # Templates
+        rx.button(
+            rx.icon("layout-template", size=14),
+            "Templates",
+            variant="outline",
+            size="1",
+            on_click=DashboardState.set_show_template_picker(True),
+        ),
         # Back to main
         rx.link(
             rx.button(
@@ -201,10 +221,19 @@ def _empty_grid() -> rx.Component:
                 size="2",
                 color="var(--gray-9)",
             ),
-            rx.button(
-                rx.icon("plus", size=14),
-                "Add First Widget",
-                on_click=DashboardState.toggle_widget_palette,
+            rx.hstack(
+                rx.button(
+                    rx.icon("plus", size=14),
+                    "Add Widget",
+                    on_click=DashboardState.toggle_widget_palette,
+                ),
+                rx.button(
+                    rx.icon("layout-template", size=14),
+                    "From Template",
+                    variant="outline",
+                    on_click=DashboardState.set_show_template_picker(True),
+                ),
+                spacing="2",
                 margin_top="8px",
             ),
             align="center",
@@ -248,4 +277,168 @@ def _save_dialog() -> rx.Component:
         ),
         open=DashboardState.show_save_dialog,
         on_open_change=DashboardState.set_show_save_dialog,
+    )
+
+
+def _edit_widget_dialog() -> rx.Component:
+    """Dialog for editing a widget's configuration."""
+    return rx.dialog.root(
+        rx.dialog.content(
+            rx.dialog.title("Edit Widget"),
+            rx.vstack(
+                # Title (common for all types)
+                rx.text("Title:", size="2", weight="medium"),
+                rx.input(
+                    value=DashboardState.edit_title,
+                    on_change=DashboardState.set_edit_title,
+                    width="100%",
+                ),
+
+                # Type-specific fields
+                # Text widget: content
+                rx.cond(
+                    DashboardState.editing_widget_type == "text",
+                    rx.vstack(
+                        rx.text("Content (Markdown):", size="2", weight="medium"),
+                        rx.text_area(
+                            value=DashboardState.edit_content,
+                            on_change=DashboardState.set_edit_content,
+                            width="100%",
+                            rows="6",
+                        ),
+                        spacing="2",
+                        width="100%",
+                    ),
+                ),
+
+                # KPI widget: value + label
+                rx.cond(
+                    DashboardState.editing_widget_type == "kpi",
+                    rx.vstack(
+                        rx.text("Value:", size="2", weight="medium"),
+                        rx.input(
+                            value=DashboardState.edit_kpi_value,
+                            on_change=DashboardState.set_edit_kpi_value,
+                            width="100%",
+                        ),
+                        rx.text("Label:", size="2", weight="medium"),
+                        rx.input(
+                            value=DashboardState.edit_kpi_label,
+                            on_change=DashboardState.set_edit_kpi_label,
+                            width="100%",
+                        ),
+                        spacing="2",
+                        width="100%",
+                    ),
+                ),
+
+                # Insight widget: title + description
+                rx.cond(
+                    DashboardState.editing_widget_type == "insight",
+                    rx.vstack(
+                        rx.text("Insight Title:", size="2", weight="medium"),
+                        rx.input(
+                            value=DashboardState.edit_insight_title,
+                            on_change=DashboardState.set_edit_insight_title,
+                            width="100%",
+                        ),
+                        rx.text("Description:", size="2", weight="medium"),
+                        rx.text_area(
+                            value=DashboardState.edit_insight_description,
+                            on_change=DashboardState.set_edit_insight_description,
+                            width="100%",
+                            rows="4",
+                        ),
+                        spacing="2",
+                        width="100%",
+                    ),
+                ),
+
+                # Chart widget: info only (chart data comes from queries)
+                rx.cond(
+                    DashboardState.editing_widget_type == "chart",
+                    rx.callout(
+                        "Chart data is populated from query results. "
+                        "Use 'Add to Dashboard' from the main view.",
+                        icon="info",
+                        size="1",
+                    ),
+                ),
+
+                # Action buttons
+                rx.hstack(
+                    rx.button(
+                        "Cancel",
+                        variant="outline",
+                        size="2",
+                        on_click=DashboardState.cancel_edit_widget,
+                    ),
+                    rx.button(
+                        "Save",
+                        size="2",
+                        on_click=DashboardState.save_widget_edit,
+                    ),
+                    spacing="2",
+                    justify="end",
+                    width="100%",
+                ),
+                spacing="3",
+                width="100%",
+            ),
+            max_width="480px",
+        ),
+        open=DashboardState.is_editing,
+        on_open_change=lambda v: DashboardState.cancel_edit_widget(),
+    )
+
+
+def _template_picker_dialog() -> rx.Component:
+    """Dialog for selecting a dashboard template."""
+    template_cards = []
+    for idx, tpl in enumerate(DASHBOARD_TEMPLATES):
+        template_cards.append(
+            rx.button(
+                rx.hstack(
+                    rx.icon(tpl["icon"], size=20, color="var(--accent-9)"),
+                    rx.vstack(
+                        rx.text(tpl["name"], size="2", weight="bold"),
+                        rx.text(tpl["description"], size="1", color="var(--gray-10)"),
+                        rx.text(
+                            f"{len(tpl['widgets'])} widgets",
+                            size="1",
+                            color="var(--gray-9)",
+                        ),
+                        spacing="0",
+                        align="start",
+                    ),
+                    spacing="3",
+                    align="center",
+                    width="100%",
+                ),
+                variant="outline",
+                width="100%",
+                on_click=DashboardState.load_template(idx),
+            )
+        )
+
+    return rx.dialog.root(
+        rx.dialog.content(
+            rx.dialog.title("New from Template"),
+            rx.dialog.description(
+                "Choose a template to start with. You can customize it later.",
+                size="2",
+            ),
+            rx.vstack(
+                *template_cards,
+                rx.dialog.close(
+                    rx.button("Cancel", variant="outline", size="2", width="100%"),
+                ),
+                spacing="2",
+                width="100%",
+                padding_top="8px",
+            ),
+            max_width="420px",
+        ),
+        open=DashboardState.show_template_picker,
+        on_open_change=DashboardState.set_show_template_picker,
     )

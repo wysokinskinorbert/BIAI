@@ -17,6 +17,7 @@ from biai.components.react_flow.process_comparison import process_comparison_car
 from biai.components.process_map_card import process_map_card
 from biai.components.erd_diagram import erd_card
 from biai.state.pinned import PinnedState
+from biai.state.dashboard import DashboardState
 from biai.components.echarts.wrapper import echarts_component
 
 
@@ -54,6 +55,20 @@ def dashboard_panel() -> rx.Component:
                         on_click=PinnedState.toggle_pinned,
                     ),
                     content="Show/hide pinned results",
+                ),
+            ),
+            # Add to Dashboard Builder
+            rx.cond(
+                ChartState.has_chart,
+                rx.tooltip(
+                    rx.icon_button(
+                        rx.icon("layout-dashboard", size=14),
+                        variant="outline",
+                        size="1",
+                        on_click=DashboardState.add_from_current_chart,
+                        aria_label="Add to Dashboard Builder",
+                    ),
+                    content="Add chart to Dashboard Builder",
                 ),
             ),
             # Export CSV button

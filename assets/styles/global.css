@@ -179,6 +179,67 @@
     outline-offset: 2px;
 }
 
+/* ── Dashboard Builder: react-grid-layout overrides ── */
+
+/* Drag handle icon */
+.widget-drag-handle {
+    cursor: grab;
+    opacity: 0.4;
+    transition: opacity 0.2s ease;
+}
+.widget-drag-handle:hover {
+    opacity: 1;
+}
+.widget-drag-handle:active {
+    cursor: grabbing;
+}
+
+/* Grid item while dragging */
+.react-grid-item.react-draggable-dragging {
+    z-index: 100 !important;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    opacity: 0.9;
+    transition: none !important;
+}
+
+/* Grid item while resizing */
+.react-grid-item.resizing {
+    z-index: 100 !important;
+    opacity: 0.9;
+}
+
+/* Placeholder (drop zone indicator) */
+.react-grid-item.react-grid-placeholder {
+    background: var(--accent-5) !important;
+    border: 2px dashed var(--accent-8) !important;
+    border-radius: 12px;
+    opacity: 0.5;
+}
+
+/* Resize handle */
+.react-grid-item > .react-resizable-handle {
+    background: none;
+}
+.react-grid-item > .react-resizable-handle::after {
+    border-color: var(--gray-8) !important;
+    width: 8px !important;
+    height: 8px !important;
+}
+.react-grid-item:hover > .react-resizable-handle::after {
+    border-color: var(--accent-9) !important;
+}
+
+/* Grid items get smooth transitions when not actively dragged */
+.react-grid-item {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.react-grid-item.cssTransforms {
+    transition: transform 0.2s ease;
+}
+.react-grid-item.react-draggable-dragging.cssTransforms {
+    transition: none !important;
+}
+
 /* Responsive layout */
 @media (max-width: 1024px) {
     .sidebar {
