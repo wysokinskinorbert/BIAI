@@ -496,7 +496,7 @@ class ChatState(rx.State):
                     try:
                         from biai.ai.insight_agent import InsightAgent
                         agent = InsightAgent()
-                        insights = agent.analyze_sync(result.df, question)
+                        insights = await agent.analyze(result.df, question)
                         insight_dicts = [i.model_dump(mode="json") for i in insights]
                         async with self:
                             self.insights = insight_dicts

@@ -1,5 +1,8 @@
 """Autonomous Insight Agent — heuristic-based data insights."""
 
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+
 import numpy as np
 import pandas as pd
 
@@ -7,6 +10,8 @@ from biai.models.insight import Insight, InsightType, InsightSeverity
 from biai.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+_EXECUTOR = ThreadPoolExecutor(max_workers=2)
 
 # Thresholds
 _PARETO_THRESHOLD = 0.80  # top 20% produces 80% of value
@@ -17,6 +22,23 @@ _TREND_MIN_POINTS = 4
 
 class InsightAgent:
     """Generates insights from query result DataFrames using statistical heuristics."""
+
+    async def analyze(
+        self, df: pd.DataFrame, question: str, timeout: float = 10.0,
+    ) -> list[Insight]:
+        """Async analysis — runs heuristics in a thread pool with timeout."""
+        try:
+            loop = asyncio.get_event_loop()
+            return await asyncio.wait_for(
+                loop.run_in_executor(_EXECUTOR, self.analyze_sync, df, question),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("insight_analysis_timeout", timeout=timeout)
+            return []
+        except Exception as e:
+            logger.error("insight_analysis_error", error=str(e))
+            return []
 
     def analyze_sync(self, df: pd.DataFrame, question: str) -> list[Insight]:
         """Synchronous analysis — returns list of insights."""

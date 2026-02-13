@@ -66,9 +66,16 @@ class AnalysisExecutor:
                         break
 
                 if step.status != StepStatus.FAILED:
+                    # Enrich question with dependency context
+                    enriched_question = step.question_for_sql
+                    if step.depends_on:
+                        dep_context = self._build_dep_context(step.depends_on, step_outputs)
+                        if dep_context:
+                            enriched_question = f"{step.question_for_sql}\n\n{dep_context}"
+
                     # Generate and execute SQL
                     sql_query, errors = await self._correction.generate_with_correction(
-                        question=step.question_for_sql,
+                        question=enriched_question,
                         db_executor=self._executor,
                     )
 
@@ -100,3 +107,23 @@ class AnalysisExecutor:
                 await on_step_update(idx, step)
 
         return results
+
+    @staticmethod
+    def _build_dep_context(
+        depends_on: list[int], step_outputs: dict[int, pd.DataFrame],
+    ) -> str:
+        """Build context string from dependency step results."""
+        parts = []
+        for dep_idx in depends_on:
+            dep_df = step_outputs.get(dep_idx)
+            if dep_df is None or dep_df.empty:
+                continue
+            cols = ", ".join(dep_df.columns.tolist())
+            summary_rows = dep_df.head(5).to_string(index=False)
+            parts.append(
+                f"[Results from step {dep_idx}: {len(dep_df)} rows, columns: {cols}]\n"
+                f"{summary_rows}"
+            )
+        if not parts:
+            return ""
+        return "Context from previous steps:\n" + "\n\n".join(parts)
