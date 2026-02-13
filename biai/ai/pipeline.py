@@ -254,8 +254,8 @@ class AIPipeline:
         for i, c in enumerate(context[-3:], 1):  # last 3 exchanges
             cols = ", ".join(c.get("columns", [])[:8])
             ctx_parts.append(
-                f"Exchange {i}: Q=\"{c['question'][:100]}\" → "
-                f"SQL=\"{c['sql'][:200]}\" → "
+                f"Exchange {i}: Q=\"{c['question'][:100]}\" -> "
+                f"SQL=\"{c['sql'][:200]}\" -> "
                 f"{c['row_count']} rows, columns=[{cols}]"
             )
         ctx_text = "\n".join(ctx_parts)

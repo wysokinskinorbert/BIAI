@@ -53,7 +53,7 @@ class AnalysisPlanner:
         ctx_text = ""
         if context:
             ctx_text = "\n".join(
-                f"Previous: {c['question'][:80]} → {c['row_count']} rows"
+                f"Previous: {c['question'][:80]} -> {c['row_count']} rows"
                 for c in context[-3:]
             )
 
