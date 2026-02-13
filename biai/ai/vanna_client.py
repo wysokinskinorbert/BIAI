@@ -52,11 +52,13 @@ def create_vanna_client(
     chroma_host: str | None = None,
     chroma_port: int | None = None,
     chroma_collection: str = DEFAULT_CHROMA_COLLECTION,
+    dialect: str = "SQL",
 ) -> MyVanna:
     """Factory function to create configured Vanna client."""
     config: dict = {
         "model": model,
         "ollama_host": ollama_host,
+        "dialect": dialect,
     }
 
     if chroma_host:

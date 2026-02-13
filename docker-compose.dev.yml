@@ -10,6 +10,8 @@ services:
       APP_USER_PASSWORD: biai123
     volumes:
       - ./scripts/oracle-seed.sql:/container-entrypoint-initdb.d/01-seed.sql
+      - ./scripts/oracle-process-seed.sql:/container-entrypoint-initdb.d/02-process-seed.sql
+      - ./scripts/oracle-process-fix.sql:/container-entrypoint-initdb.d/03-process-fix.sql
     healthcheck:
       test: ["CMD", "healthcheck.sh"]
       interval: 30s
@@ -28,6 +30,7 @@ services:
       POSTGRES_PASSWORD: biai123
     volumes:
       - ./scripts/postgres-seed.sql:/docker-entrypoint-initdb.d/01-seed.sql
+      - ./scripts/postgres-process-seed.sql:/docker-entrypoint-initdb.d/02-process-seed.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U biai -d biai_test"]
       interval: 10s

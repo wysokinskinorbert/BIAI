@@ -1,6 +1,17 @@
 """Schema explorer state."""
 
+from typing import Any
+
 import reflex as rx
+
+
+# ERD layout constants
+_ERD_COLS_PER_ROW = 3
+_ERD_NODE_WIDTH = 240
+_ERD_NODE_HEIGHT_BASE = 60
+_ERD_NODE_HEIGHT_PER_COL = 22
+_ERD_GAP_X = 300
+_ERD_GAP_Y = 40
 
 
 class SchemaState(rx.State):
@@ -17,6 +28,10 @@ class SchemaState(rx.State):
 
     # Search
     search_query: str = ""
+
+    # ERD data (serialized for React Flow)
+    erd_nodes: list[dict[str, Any]] = []
+    erd_edges: list[dict[str, Any]] = []
 
     def set_search_query(self, value: str):
         self.search_query = value
@@ -40,8 +55,81 @@ class SchemaState(rx.State):
         q = self.search_query.lower()
         return [t for t in self.tables if q in t.get("name", "").lower()]
 
+    @rx.var
+    def has_erd(self) -> bool:
+        return len(self.erd_nodes) > 0
+
+    @rx.var
+    def table_count_label(self) -> str:
+        n = len(self.erd_nodes)
+        return f"{n} tables" if n != 1 else "1 table"
+
+    @rx.var
+    def erd_edge_count(self) -> int:
+        return len(self.erd_edges)
+
+    @rx.var
+    def erd_edge_count_label(self) -> str:
+        n = len(self.erd_edges)
+        return f"{n} foreign keys" if n != 1 else "1 foreign key"
+
     # Internal storage for full table data (columns nested inside)
     _tables_full: list[dict] = []
+
+    def _compute_erd(self) -> None:
+        """Build ERD nodes and edges from _tables_full data."""
+        nodes: list[dict[str, Any]] = []
+        edges: list[dict[str, Any]] = []
+        table_names = {t["name"] for t in self._tables_full}
+
+        for idx, table in enumerate(self._tables_full):
+            col = idx % _ERD_COLS_PER_ROW
+            row = idx // _ERD_COLS_PER_ROW
+            num_cols = len(table.get("columns", []))
+            node_h = _ERD_NODE_HEIGHT_BASE + num_cols * _ERD_NODE_HEIGHT_PER_COL
+
+            # Calculate y offset based on max height of previous rows
+            y_offset = row * (_ERD_NODE_HEIGHT_BASE + 10 * _ERD_NODE_HEIGHT_PER_COL + _ERD_GAP_Y)
+
+            columns_data = []
+            for c in table.get("columns", []):
+                columns_data.append({
+                    "name": c.get("name", ""),
+                    "type": c.get("data_type", ""),
+                    "isPk": c.get("is_pk", False),
+                    "isFk": c.get("is_fk", False),
+                })
+
+                # Create edge for FK relationships
+                fk_ref = c.get("fk_ref", "")
+                if fk_ref and fk_ref in table_names:
+                    edge_id = f"e-{table['name']}-{c['name']}-{fk_ref}"
+                    edges.append({
+                        "id": edge_id,
+                        "source": table["name"],
+                        "target": fk_ref,
+                        "type": "smoothstep",
+                        "animated": True,
+                        "label": c["name"],
+                        "style": {"stroke": "var(--orange-9)", "strokeWidth": 2},
+                        "labelStyle": {"fill": "var(--gray-11)", "fontSize": 10},
+                    })
+
+            nodes.append({
+                "id": table["name"],
+                "type": "erdTable",
+                "position": {
+                    "x": col * _ERD_GAP_X,
+                    "y": y_offset,
+                },
+                "data": {
+                    "label": table["name"],
+                    "columns": columns_data,
+                },
+            })
+
+        self.erd_nodes = nodes
+        self.erd_edges = edges
 
     @rx.event(background=True)
     async def refresh_schema(self):
@@ -87,6 +175,9 @@ class SchemaState(rx.State):
                         cols.append({
                             "name": col.name,
                             "data_type": col.data_type,
+                            "is_pk": col.is_primary_key,
+                            "is_fk": col.is_foreign_key,
+                            "fk_ref": col.foreign_key_ref or "",
                         })
 
                     tables_flat.append({
@@ -105,6 +196,7 @@ class SchemaState(rx.State):
                     self._tables_full = tables_full
                     self.selected_table = ""
                     self.selected_columns = []
+                    self._compute_erd()
                     self.is_loading = False
             finally:
                 await connector.disconnect()

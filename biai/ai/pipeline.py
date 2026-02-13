@@ -11,14 +11,22 @@ from biai.ai.sql_validator import SQLValidator
 from biai.ai.self_correction import SelfCorrectionLoop
 from biai.ai.chart_advisor import ChartAdvisor
 from biai.ai.training import SchemaTrainer
+from biai.ai.process_training import has_process_tables, get_process_documentation, get_process_examples
+from biai.ai.process_discovery import ProcessDiscoveryEngine
+from biai.ai.process_cache import ProcessDiscoveryCache
+from biai.ai.process_training_dynamic import DynamicProcessTrainer
+
+# Module-level singleton: shared across pipeline instances (survives pipeline GC)
+_discovery_cache = ProcessDiscoveryCache()
 from biai.ai.prompt_templates import DESCRIPTION_PROMPT, SYSTEM_PROMPT, format_dialect_rules
-from biai.config.constants import DEFAULT_MODEL, DEFAULT_OLLAMA_HOST, DEFAULT_CHROMA_COLLECTION
+from biai.config.constants import DEFAULT_MODEL, DEFAULT_OLLAMA_HOST, DEFAULT_CHROMA_COLLECTION, USE_DYNAMIC_DISCOVERY
 from biai.db.base import DatabaseConnector
 from biai.db.dialect import DialectHelper
 from biai.db.schema_manager import SchemaManager
 from biai.db.query_executor import QueryExecutor
 from biai.models.connection import DBType
 from biai.models.chart import ChartConfig
+from biai.models.process import ProcessFlowConfig
 from biai.models.query import QueryResult, QueryError, SQLQuery
 from biai.utils.logger import get_logger
 
@@ -34,6 +42,7 @@ class PipelineResult:
         self.query_result: QueryResult | None = None
         self.query_error: QueryError | None = None
         self.chart_config: ChartConfig | None = None
+        self.process_config: ProcessFlowConfig | None = None
         self.description: str = ""
         self.errors: list[str] = []
         self.df: pd.DataFrame | None = None
@@ -60,16 +69,18 @@ class AIPipeline:
         self._ollama_host = ollama_host
         self._ollama_model = ollama_model
 
-        # Create Vanna client
+        # Set dialect
+        dialect = DialectHelper.get_sqlglot_dialect(db_type)
+        dialect_name = DialectHelper.get_dialect_name(db_type)
+
+        # Create Vanna client with correct dialect
         self._vanna = create_vanna_client(
             model=ollama_model,
             ollama_host=ollama_host,
             chroma_host=chroma_host,
             chroma_collection=chroma_collection,
+            dialect=dialect_name,
         )
-
-        # Set dialect
-        dialect = DialectHelper.get_sqlglot_dialect(db_type)
 
         # Create components
         self._validator = SQLValidator(dialect=dialect)
@@ -79,11 +90,13 @@ class AIPipeline:
         self._schema_manager = SchemaManager(connector)
         self._query_executor = QueryExecutor(connector)
 
-        # Set system prompt with dialect rules
+        # Inject dialect rules into Vanna's static documentation
+        # This ensures rules are included in every SQL generation prompt
         rules = DialectHelper.get_rules(db_type)
-        self._system_prompt = SYSTEM_PROMPT.format(
-            dialect_rules=format_dialect_rules(rules)
-        )
+        self._vanna.static_documentation = format_dialect_rules(rules)
+
+        # Dynamic discovery state (cache is module-level singleton)
+        self._discovered_processes: list = []
 
         logger.info(
             "pipeline_initialized",
@@ -107,6 +120,39 @@ class AIPipeline:
         # Generate docs and examples from actual schema (real column names)
         docs = DialectHelper.get_documentation(snapshot)
         examples = DialectHelper.get_examples(self._db_type, schema=snapshot)
+        is_oracle = self._db_type == DBType.ORACLE
+
+        # Dynamic process discovery (preferred)
+        if USE_DYNAMIC_DISCOVERY:
+            try:
+                # Check module-level cache first
+                cached = _discovery_cache.get(self._connector.config)
+                if cached is not None:
+                    discovered = cached
+                else:
+                    engine = ProcessDiscoveryEngine(
+                        self._connector, snapshot,
+                        ollama_host=self._ollama_host,
+                        ollama_model=self._ollama_model,
+                    )
+                    discovered = await engine.discover()
+                    _discovery_cache.store(self._connector.config, discovered)
+
+                if discovered:
+                    trainer = DynamicProcessTrainer()
+                    docs.extend(trainer.generate_documentation(discovered, snapshot))
+                    examples.extend(trainer.generate_examples(discovered, is_oracle=is_oracle))
+                    self._discovered_processes = discovered
+                    logger.info("dynamic_discovery_training_added", count=len(discovered))
+            except Exception as e:
+                logger.warning("dynamic_discovery_failed", error=str(e))
+
+        # Fallback: add legacy process-specific training data
+        if not self._discovered_processes and has_process_tables(snapshot):
+            docs.extend(get_process_documentation(snapshot))
+            examples.extend(get_process_examples(snapshot, is_oracle=is_oracle))
+            logger.info("process_training_data_added", is_oracle=is_oracle)
+
         return self._trainer.train_full(schema=snapshot, docs=docs, examples=examples)
 
     async def process(self, question: str) -> PipelineResult:
@@ -147,10 +193,46 @@ class AIPipeline:
                 df=result.df,
             )
 
+        # Step 3b: Detect process in results
+        from biai.ai.process_detector import ProcessDetector
+        from biai.ai.process_graph_builder import ProcessGraphBuilder
+        from biai.config.constants import PROCESS_DETECTION_ENABLED
+
+        if PROCESS_DETECTION_ENABLED and result.df is not None and not result.df.empty:
+            detector = ProcessDetector()
+            if detector.detect_in_dataframe(result.df, question):
+                builder = ProcessGraphBuilder()
+                # Use dynamic discovery if available (check cache if not populated yet)
+                discovered_procs = self._discovered_processes
+                if not discovered_procs and USE_DYNAMIC_DISCOVERY:
+                    cached = _discovery_cache.get(self._connector.config)
+                    if cached:
+                        discovered_procs = cached
+                        self._discovered_processes = cached
+                if discovered_procs:
+                    process_type, discovered = detector.detect_process_type_dynamic(
+                        result.df, sql_query.sql, discovered_procs,
+                    )
+                else:
+                    process_type = detector.detect_process_type(result.df, sql_query.sql)
+                    discovered = None
+                result.process_config = builder.build(
+                    result.df, process_type, question, discovered=discovered,
+                )
+                if result.process_config:
+                    logger.info(
+                        "process_detected",
+                        process_type=process_type,
+                        nodes=len(result.process_config.nodes),
+                        edges=len(result.process_config.edges),
+                        dynamic=discovered is not None,
+                    )
+
         logger.info(
             "pipeline_success",
             rows=exec_result.row_count,
             chart_type=result.chart_config.chart_type.value if result.chart_config else "none",
+            has_process=result.process_config is not None,
         )
         return result
 

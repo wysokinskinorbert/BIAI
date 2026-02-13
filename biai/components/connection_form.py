@@ -3,11 +3,14 @@
 import reflex as rx
 
 from biai.state.database import DBState
+from biai.components.connection_presets import connection_presets
 
 
 def connection_form() -> rx.Component:
     """Database connection form."""
     return rx.vstack(
+        connection_presets(),
+        rx.separator(),
         rx.text("Database Connection", size="3", weight="bold"),
 
         # DB Type selector
@@ -21,11 +24,12 @@ def connection_form() -> rx.Component:
 
         # Host
         rx.input(
-            placeholder="Host",
+            placeholder="Host *",
             value=DBState.host,
             on_change=DBState.set_host,
             size="2",
             width="100%",
+            required=True,
         ),
 
         # Port
@@ -39,20 +43,22 @@ def connection_form() -> rx.Component:
 
         # Database
         rx.input(
-            placeholder="Database / Service Name",
+            placeholder="Database / Service Name *",
             value=DBState.database,
             on_change=DBState.set_database,
             size="2",
             width="100%",
+            required=True,
         ),
 
         # Username
         rx.input(
-            placeholder="Username",
+            placeholder="Username *",
             value=DBState.username,
             on_change=DBState.set_username,
             size="2",
             width="100%",
+            required=True,
         ),
 
         # Password
@@ -67,7 +73,7 @@ def connection_form() -> rx.Component:
 
         # DSN (alternative)
         rx.input(
-            placeholder="DSN (alternative to above fields)",
+            placeholder="DSN (alternative to host/port/db)",
             value=DBState.dsn,
             on_change=DBState.set_dsn,
             size="2",
@@ -76,31 +82,38 @@ def connection_form() -> rx.Component:
 
         # Buttons
         rx.hstack(
-            rx.button(
-                rx.cond(
-                    DBState.is_connecting,
-                    rx.spinner(size="1"),
-                    rx.icon("plug", size=14),
+            rx.tooltip(
+                rx.button(
+                    rx.cond(
+                        DBState.is_connecting,
+                        rx.spinner(size="1"),
+                        rx.icon("plug", size=14),
+                    ),
+                    rx.cond(
+                        DBState.is_connected,
+                        "Reconnect",
+                        "Connect",
+                    ),
+                    on_click=DBState.connect,
+                    loading=DBState.is_connecting,
+                    disabled=~DBState.can_connect,
+                    size="2",
+                    flex="1",
                 ),
-                rx.cond(
-                    DBState.is_connected,
-                    "Reconnect",
-                    "Connect",
-                ),
-                on_click=DBState.connect,
-                loading=DBState.is_connecting,
-                size="2",
-                flex="1",
+                content="Connect to database",
             ),
             rx.cond(
                 DBState.is_connected,
-                rx.button(
-                    rx.icon("unplug", size=14),
-                    "Disconnect",
-                    on_click=DBState.disconnect,
-                    variant="outline",
-                    color_scheme="red",
-                    size="2",
+                rx.tooltip(
+                    rx.button(
+                        rx.icon("unplug", size=14),
+                        "Disconnect",
+                        on_click=DBState.disconnect,
+                        variant="outline",
+                        color_scheme="red",
+                        size="2",
+                    ),
+                    content="Disconnect from database",
                 ),
             ),
             width="100%",
@@ -125,6 +138,20 @@ def connection_form() -> rx.Component:
                 size="1",
                 color="var(--gray-11)",
                 trim="both",
+            ),
+        ),
+
+        # Write permissions warning (CSS display to avoid ghost a11y node)
+        rx.callout(
+            "DB user has write permissions. Recommend using a read-only account.",
+            icon="alert-triangle",
+            color_scheme="orange",
+            size="1",
+            width="100%",
+            display=rx.cond(
+                DBState.is_connected & ~DBState.is_read_only,
+                "flex",
+                "none",
             ),
         ),
 

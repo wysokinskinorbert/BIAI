@@ -45,7 +45,7 @@ class SettingsState(rx.State):
         self.settings_row_limit = value
 
     async def save_settings(self):
-        from biai.components.model_selector import ModelState
+        from biai.state.model import ModelState
         model_state = await self.get_state(ModelState)
         model_state.ollama_host = self.settings_ollama_host
         model_state.selected_model = self.settings_ollama_model
@@ -60,7 +60,7 @@ class SettingsState(rx.State):
         self.settings_row_limit = str(ROW_LIMIT)
         self.save_message = "Settings reset to defaults."
         # Propagate defaults back to ModelState
-        from biai.components.model_selector import ModelState
+        from biai.state.model import ModelState
         model_state = await self.get_state(ModelState)
         model_state.ollama_host = self.settings_ollama_host
         model_state.selected_model = self.settings_ollama_model

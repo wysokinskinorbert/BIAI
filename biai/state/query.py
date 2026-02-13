@@ -1,8 +1,22 @@
 """Query state for SQL viewer and data table."""
 
+import math
+
 import reflex as rx
 
 from biai.config.constants import DISPLAY_ROW_LIMIT
+
+
+def _cell_to_str(cell) -> str:
+    """Convert a cell value to display string, replacing None/nan with empty string."""
+    if cell is None:
+        return ""
+    if isinstance(cell, float) and math.isnan(cell):
+        return ""
+    s = str(cell)
+    if s in ("None", "nan", "NaN", "NaT"):
+        return ""
+    return s
 
 
 class QueryState(rx.State):
@@ -34,7 +48,8 @@ class QueryState(rx.State):
         self.current_sql = sql
         self.columns = columns
         # Convert all values to strings for Reflex foreach compatibility
-        self.rows = [[str(cell) for cell in row] for row in rows]
+        # Replace None/nan with empty string for clean display
+        self.rows = [[_cell_to_str(cell) for cell in row] for row in rows]
         self.row_count = row_count
         self.execution_time_ms = execution_time_ms
         self.is_truncated = truncated

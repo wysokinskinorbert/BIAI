@@ -13,13 +13,16 @@ def schema_explorer() -> rx.Component:
         rx.hstack(
             rx.text("Schema Explorer", size="3", weight="bold"),
             rx.spacer(),
-            rx.icon_button(
-                rx.icon("refresh-cw", size=14),
-                on_click=SchemaState.refresh_schema,
-                loading=SchemaState.is_loading,
-                variant="ghost",
-                size="1",
-                aria_label="Refresh schema",
+            rx.tooltip(
+                rx.icon_button(
+                    rx.icon("refresh-cw", size=14),
+                    on_click=SchemaState.refresh_schema,
+                    loading=SchemaState.is_loading,
+                    variant="ghost",
+                    size="1",
+                    aria_label="Refresh schema",
+                ),
+                content="Refresh schema",
             ),
             width="100%",
             align="center",

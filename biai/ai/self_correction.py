@@ -1,5 +1,7 @@
 """Self-correction loop for SQL generation."""
 
+import re
+
 from biai.ai.sql_validator import SQLValidator
 from biai.ai.prompt_templates import CORRECTION_PROMPT
 from biai.config.constants import MAX_RETRIES
@@ -7,6 +9,20 @@ from biai.models.query import SQLQuery, QueryError
 from biai.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+_REFUSAL_PATTERNS = re.compile(
+    r"sorry|i can'?t|i cannot|i'?m unable|i am unable|not able to|"
+    r"can'?t assist|cannot assist|cannot help|apologize|as an ai",
+    re.IGNORECASE,
+)
+
+
+def _is_refusal(text: str) -> bool:
+    """Detect if LLM output is a refusal instead of SQL."""
+    stripped = text.strip()
+    if stripped.upper().startswith(("SELECT", "WITH")):
+        return False
+    return bool(_REFUSAL_PATTERNS.search(stripped))
 
 
 class SelfCorrectionLoop:
@@ -28,17 +44,19 @@ class SelfCorrectionLoop:
             Tuple of (final SQLQuery, list of error messages from attempts)
         """
         errors: list[str] = []
+        last_sql = ""
 
         for attempt in range(1, self._max_retries + 1):
             logger.info("sql_generation_attempt", attempt=attempt, question=question[:50])
 
             # Generate SQL
-            if attempt == 1:
+            if attempt == 1 or not last_sql:
+                # First attempt OR previous was refusal/empty → fresh generation
                 raw_sql = self._vanna.generate_sql(question)
             else:
-                # Use correction prompt with previous error
+                # Use correction prompt with previous SQL and error
                 correction = CORRECTION_PROMPT.format(
-                    sql=errors[-1] if errors else "",
+                    sql=last_sql,
                     error=errors[-1] if errors else "Unknown error",
                     dialect=self._validator._dialect or "SQL",
                 )
@@ -52,6 +70,15 @@ class SelfCorrectionLoop:
 
             # Clean SQL (remove markdown fences if present)
             sql = _clean_sql(raw_sql)
+
+            # Detect AI refusal (e.g. "Sorry, I can't assist...")
+            if _is_refusal(sql):
+                error_msg = f"Attempt {attempt}: AI refused to generate SQL"
+                errors.append(error_msg)
+                logger.warning("ai_refusal", attempt=attempt, response=sql[:100])
+                continue
+
+            last_sql = sql
 
             # Validate
             query = self._validator.validate(sql)

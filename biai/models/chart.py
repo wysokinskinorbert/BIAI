@@ -13,6 +13,15 @@ class ChartType(str, Enum):
     AREA = "area"
     HEATMAP = "heatmap"
     TABLE = "table"  # fallback: no chart, just table
+    PROCESS_FLOW = "process_flow"
+    TIMELINE = "timeline"
+    SANKEY = "sankey"
+
+
+class ChartEngine(str, Enum):
+    """Chart rendering engine."""
+    PLOTLY = "plotly"
+    ECHARTS = "echarts"
 
 
 class ChartConfig(BaseModel):
@@ -24,5 +33,6 @@ class ChartConfig(BaseModel):
     group_column: str | None = None
     show_legend: bool = True
     show_labels: bool = False
+    engine: ChartEngine = ChartEngine.ECHARTS
 
 

@@ -229,4 +229,87 @@ const processNodeTypes = {
   processGateway: ProcessGatewayNode,
   processCurrent: ProcessCurrentNode,
 };
+
+const ERDTableNode = ({ data }) => {
+  return (
+    <div style={{
+      background: 'var(--gray-2)', border: '1px solid var(--gray-6)',
+      borderRadius: '8px', minWidth: '200px', fontSize: '12px',
+      overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+    }}>
+      <div style={{
+        padding: '8px 12px', background: 'var(--accent-9)', color: 'white',
+        fontWeight: 600, fontSize: '13px',
+      }}>
+        {data.label}
+      </div>
+      <div style={{ padding: '4px 0' }}>
+        {(data.columns || []).map((col, i) => (
+          <div key={i} style={{
+            padding: '3px 12px', display: 'flex', justifyContent: 'space-between',
+            borderBottom: '1px solid var(--gray-4)', fontSize: '11px',
+          }}>
+            <span style={{
+              fontWeight: col.isPk ? 700 : col.isFk ? 600 : 400,
+              color: col.isPk ? 'var(--accent-11)' : col.isFk ? 'var(--orange-11)' : 'inherit',
+            }}>
+              {col.isPk ? '\\uD83D\\uDD11 ' : col.isFk ? '\\uD83D\\uDD17 ' : ''}{col.name}
+            </span>
+            <span style={{ color: 'var(--gray-9)', marginLeft: '12px' }}>{col.type}</span>
+          </div>
+        ))}
+      </div>
+      <Handle type="target" position={Position.Top} style={{ background: 'var(--accent-9)' }} />
+      <Handle type="source" position={Position.Bottom} style={{ background: 'var(--accent-9)' }} />
+    </div>
+  );
+};
+
+const erdNodeTypes = {
+  erdTable: ERDTableNode,
+};
+
+/* --- Token animation on edges --- */
+const tokenAnimationStyle = document.createElement('style');
+tokenAnimationStyle.textContent = `
+  @keyframes flowDash {
+    to { stroke-dashoffset: -20; }
+  }
+  .animated-tokens .react-flow__edge-path {
+    stroke-dasharray: 5 5;
+    animation: flowDash 0.6s linear infinite;
+  }
+  .animated-tokens .react-flow__edge-path[style*="stroke"] {
+    stroke-dasharray: 5 5;
+    animation: flowDash 0.6s linear infinite;
+  }
+  /* Diff markers for process comparison */
+  .diff-added { outline: 2px dashed #22c55e; outline-offset: 4px; }
+  .diff-removed { outline: 2px dashed #ef4444; outline-offset: 4px; opacity: 0.6; }
+  .diff-changed { outline: 2px dashed #f59e0b; outline-offset: 4px; }
+`;
+if (typeof document !== 'undefined') {
+  document.head.appendChild(tokenAnimationStyle);
+}
+
+window.exportFlowToPng = function() {
+  const el = document.querySelector('.react-flow');
+  if (!el) return;
+  import('https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/+esm').then(function(mod) {
+    mod.toPng(el, {
+      backgroundColor: '#111',
+      quality: 1.0,
+      pixelRatio: 2,
+    }).then(function(dataUrl) {
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = 'biai-flow-export.png';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    });
+  }).catch(function(err) {
+    console.error('Export to PNG failed:', err);
+  });
+};
 """

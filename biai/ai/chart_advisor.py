@@ -4,7 +4,8 @@ import json
 
 import pandas as pd
 
-from biai.models.chart import ChartConfig, ChartType
+from biai.models.chart import ChartConfig, ChartEngine, ChartType
+from biai.ai.echarts_builder import can_use_echarts
 from biai.ai.prompt_templates import CHART_ADVISOR_PROMPT
 from biai.utils.logger import get_logger
 
@@ -31,8 +32,12 @@ class ChartAdvisor:
         if self._vanna and len(df) > 0:
             llm_config = self._llm_recommend(question, sql, df)
             if llm_config:
-                return llm_config
+                config = llm_config
 
+        # Auto-select engine: simple types → ECharts, complex → Plotly
+        config.engine = (
+            ChartEngine.ECHARTS if can_use_echarts(config.chart_type) else ChartEngine.PLOTLY
+        )
         return config
 
     def _heuristic_recommend(self, df: pd.DataFrame, question: str) -> ChartConfig:
@@ -63,6 +68,17 @@ class ChartAdvisor:
             y_cols = [c for c in value_cols if c != x_col][:3]
             if not y_cols:
                 y_cols = [num_cols[-1]]
+
+            # Area chart for cumulative/stacked data
+            area_keywords = ["cumulative", "stacked", "growth", "total over", "accumulated"]
+            if any(kw in question_lower for kw in area_keywords):
+                return ChartConfig(
+                    chart_type=ChartType.AREA,
+                    x_column=x_col,
+                    y_columns=y_cols,
+                    title=_generate_title(question),
+                )
+
             return ChartConfig(
                 chart_type=ChartType.LINE,
                 x_column=x_col,
@@ -88,6 +104,49 @@ class ChartAdvisor:
                 chart_type=ChartType.SCATTER,
                 x_column=num_cols[0],
                 y_columns=[num_cols[1]],
+                title=_generate_title(question),
+            )
+
+        # Heatmap: 2+ categorical + 1 numeric, matrix-like data
+        heatmap_keywords = ["heatmap", "matrix", "correlation", "cross-tab", "pivot"]
+        if (
+            len(cat_cols) >= 2
+            and len(num_cols) >= 1
+            and len(df) > 3
+            and any(kw in question_lower for kw in heatmap_keywords)
+        ):
+            return ChartConfig(
+                chart_type=ChartType.HEATMAP,
+                x_column=cat_cols[0],
+                y_columns=num_cols[:1],
+                title=_generate_title(question),
+            )
+
+        # Timeline: date column + category
+        timeline_keywords = ["timeline", "gantt", "schedule", "milestones", "events"]
+        if any(kw in question_lower for kw in timeline_keywords) and has_date_col:
+            date_col = next(
+                (c for c in df.columns if any(p in c.lower() for p in ("date", "time", "month", "year"))),
+                cat_cols[0] if cat_cols else df.columns[0],
+            )
+            label_col = next(
+                (c for c in cat_cols if c != date_col),
+                num_cols[0] if num_cols else df.columns[0],
+            )
+            return ChartConfig(
+                chart_type=ChartType.TIMELINE,
+                x_column=date_col,
+                y_columns=[label_col],
+                title=_generate_title(question),
+            )
+
+        # Sankey: flow/funnel with source -> target -> value
+        sankey_keywords = ["flow", "funnel", "transition", "from to", "sankey"]
+        if any(kw in question_lower for kw in sankey_keywords) and len(df.columns) >= 3:
+            return ChartConfig(
+                chart_type=ChartType.SANKEY,
+                x_column=df.columns[0],
+                y_columns=[df.columns[1], df.columns[2]],
                 title=_generate_title(question),
             )
 

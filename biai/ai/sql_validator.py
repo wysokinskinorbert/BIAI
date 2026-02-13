@@ -22,6 +22,10 @@ class SQLValidator:
         """Validate a SQL query. Returns SQLQuery with is_valid flag."""
         sql = sql.strip().rstrip(";").strip()
 
+        # Sanitize Oracle bind variable placeholders before validation
+        if self._dialect == "oracle":
+            sql = self._sanitize_bind_variables(sql)
+
         query = SQLQuery(sql=sql, dialect=self._dialect or "")
 
         # Layer 1: Check for blocked keywords (case-insensitive)
@@ -38,15 +42,20 @@ class SQLValidator:
             logger.warning("sql_blocked_pattern", sql=sql[:100], error=error)
             return query
 
-        # Layer 3: AST parsing with sqlglot
-        error = self._check_ast(sql)
+        # Layer 3: AST parsing with sqlglot + transpilation
+        error, transpiled = self._check_ast(sql)
         if error:
             query.validation_error = error
             logger.warning("sql_ast_invalid", sql=sql[:100], error=error)
             return query
 
+        # Use transpiled SQL (fixes LIMIT → FETCH FIRST for Oracle, etc.)
+        if transpiled and transpiled != sql:
+            logger.info("sql_transpiled", original=sql[:80], transpiled=transpiled[:80])
+            query.sql = transpiled
+
         query.is_valid = True
-        logger.info("sql_validated", sql=sql[:100])
+        logger.info("sql_validated", sql=query.sql[:100])
         return query
 
     def _check_blocked_keywords(self, sql: str) -> str | None:
@@ -79,33 +88,52 @@ class SQLValidator:
                 return f"Blocked pattern detected: {pattern}"
         return None
 
-    def _check_ast(self, sql: str) -> str | None:
-        """Parse SQL into AST and verify it's a SELECT statement."""
+    def _check_ast(self, sql: str) -> tuple[str | None, str | None]:
+        """Parse SQL into AST, verify it's SELECT, and transpile to target dialect.
+
+        Returns:
+            Tuple of (error_message, transpiled_sql). If error, transpiled is None.
+        """
         try:
             parsed = sqlglot.parse(sql, dialect=self._dialect)
         except sqlglot.errors.ParseError as e:
-            return f"SQL parse error: {e}"
+            return f"SQL parse error: {e}", None
 
         if not parsed:
-            return "Empty SQL statement"
+            return "Empty SQL statement", None
 
         if len(parsed) > 1:
-            return "Multiple statements detected (only single SELECT allowed)"
+            return "Multiple statements detected (only single SELECT allowed)", None
 
         statement = parsed[0]
 
         if statement is None:
-            return "Failed to parse SQL statement"
+            return "Failed to parse SQL statement", None
 
         # Must be a SELECT expression
         if not isinstance(statement, exp.Select):
             stmt_type = type(statement).__name__
-            return f"Only SELECT statements allowed, got: {stmt_type}"
+            return f"Only SELECT statements allowed, got: {stmt_type}", None
 
         # Check for subqueries containing non-SELECT
         for node in statement.walk():
             if isinstance(node, (exp.Insert, exp.Update, exp.Delete, exp.Drop,
                                  exp.Create, exp.Alter)):
-                return f"Non-SELECT operation found in query: {type(node).__name__}"
+                return f"Non-SELECT operation found in query: {type(node).__name__}", None
 
-        return None
+        # Transpile to target dialect (e.g. LIMIT → FETCH FIRST for Oracle)
+        try:
+            transpiled = statement.sql(dialect=self._dialect)
+        except Exception:
+            transpiled = sql
+
+        return None, transpiled
+
+    def _sanitize_bind_variables(self, sql: str) -> str:
+        """Replace Oracle bind variable placeholders with string literals.
+
+        LLMs sometimes generate :PARAM_NAME which Oracle interprets as bind
+        variables.  Replace them with 'PARAM_NAME' string literals so the
+        query can execute without parameters.
+        """
+        return re.sub(r":([A-Za-z_]\w*)", r"'\1'", sql)

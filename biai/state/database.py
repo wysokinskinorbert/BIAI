@@ -23,6 +23,7 @@ class DBState(rx.State):
     is_connecting: bool = False
     server_version: str = ""
     connection_error: str = ""
+    is_read_only: bool = True
 
     # Connector reference (not serialized)
     _connector: any = None
@@ -99,12 +100,18 @@ class DBState(rx.State):
             if success:
                 await connector.connect()
 
+            # Check write permissions (non-blocking)
+            read_only = True
+            if success:
+                read_only = await self._check_read_only(connector)
+
             async with self:
                 if success:
                     self.is_connected = True
                     self.server_version = message
                     self.connection_error = ""
                     self._connector = connector
+                    self.is_read_only = read_only
                 else:
                     self.is_connected = False
                     self.connection_error = self._friendly_error(message)
@@ -124,7 +131,15 @@ class DBState(rx.State):
                     tables_flat: list[dict[str, str]] = []
                     tables_full: list[dict] = []
                     for table in snapshot.tables:
-                        cols = [{"name": c.name, "data_type": c.data_type} for c in table.columns]
+                        cols = []
+                        for c in table.columns:
+                            cols.append({
+                                "name": c.name,
+                                "data_type": c.data_type,
+                                "is_pk": c.is_primary_key,
+                                "is_fk": c.is_foreign_key,
+                                "fk_ref": c.foreign_key_ref or "",
+                            })
                         tables_flat.append({
                             "name": table.name,
                             "schema": table.schema_name,
@@ -136,6 +151,7 @@ class DBState(rx.State):
                         schema_state.tables = tables_flat
                         schema_state._tables_full = tables_full
                         schema_state.schema_error = ""
+                        schema_state._compute_erd()
                 except Exception:
                     pass  # Schema refresh is non-blocking
         except Exception as e:
@@ -165,6 +181,44 @@ class DBState(rx.State):
             return "Cannot resolve hostname. Check the host address."
         return raw
 
+    @staticmethod
+    async def _check_read_only(connector) -> bool:
+        """Check if DB user is read-only by attempting to create a temp table.
+
+        Returns True if read-only, False if user has write permissions.
+        """
+        import asyncio
+
+        try:
+            from biai.db.postgresql import PostgreSQLConnector
+            if isinstance(connector, PostgreSQLConnector) and connector._pool:
+                async with connector._pool.acquire() as conn:
+                    await conn.execute("CREATE TEMP TABLE _biai_rw_check (id int)")
+                    await conn.execute("DROP TABLE IF EXISTS _biai_rw_check")
+                return False  # Has write permissions
+
+            from biai.db.oracle import OracleConnector
+            if isinstance(connector, OracleConnector) and connector._pool:
+                def _oracle_check():
+                    conn = connector._pool.acquire()
+                    try:
+                        cursor = conn.cursor()
+                        cursor.execute(
+                            "CREATE GLOBAL TEMPORARY TABLE biai_rw_check "
+                            "(id NUMBER) ON COMMIT PRESERVE ROWS"
+                        )
+                        cursor.execute("DROP TABLE biai_rw_check")
+                        cursor.close()
+                    finally:
+                        connector._pool.release(conn)
+
+                await asyncio.to_thread(_oracle_check)
+                return False  # Has write permissions
+
+            return True  # Unknown connector type, assume read-only
+        except Exception:
+            return True  # Error = read-only (no write permissions)
+
     @rx.event(background=True)
     async def disconnect(self):
         async with self:
@@ -176,6 +230,7 @@ class DBState(rx.State):
             self._connector = None
             self.is_connected = False
             self.server_version = ""
+            self.is_read_only = True
 
         # Reset schema training flag so next connect retrains
         try:

@@ -73,6 +73,50 @@ Do not use LaTeX, mathematical notation, or dollar signs for formatting. Use pla
 """
 
 
+PROCESS_DISCOVERY_PROMPT = """Analyze this database schema and the discovered process candidates below.
+For each candidate, provide a business-friendly interpretation.
+
+**Database schema (tables and columns):**
+{schema_ddl}
+
+**Discovered candidates:**
+{candidates_json}
+
+Respond in this exact JSON format (a list):
+[
+  {{
+    "id": "candidate_id_from_input",
+    "name": "Human-Friendly Process Name",
+    "description": "2-3 sentence business description of this process",
+    "stages": ["stage1", "stage2", "stage3"],
+    "branches": {{"gateway_stage": ["branch1", "branch2"]}},
+    "stage_labels": {{"stage_id": "Human Label"}},
+    "stage_colors": {{"stage_id": "#hexcolor"}},
+    "stage_icons": {{"stage_id": "lucide-icon-name"}}
+  }}
+]
+
+Guidelines:
+- Order stages in the logical business sequence (start to end)
+- Branches are alternative paths from a gateway stage
+- Use short, clear labels for stages
+- Use hex colors that convey meaning (green=success, red=failure, blue=active, yellow=waiting)
+- Use Lucide icon names (e.g., "truck", "check-circle", "clock", "user")
+- If you cannot determine the process, set confidence to 0 and return minimal data
+"""
+
+PROCESS_DESCRIPTION_PROMPT = """Describe this business process based on the data below.
+
+**Process name:** {process_name}
+**Tables involved:** {tables}
+**Stages found:** {stages}
+**Stage counts:** {stage_counts}
+
+Provide a 3-4 sentence business-friendly description of what this process does,
+who uses it, and what the key stages mean. Use plain text only, no markdown.
+"""
+
+
 def format_dialect_rules(rules: list[str]) -> str:
     """Format dialect rules into the system prompt."""
     if not rules:

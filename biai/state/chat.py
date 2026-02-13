@@ -4,9 +4,14 @@ import re
 
 import reflex as rx
 
+from biai.ai.chart_builder import build_plotly_figure
+from biai.ai.echarts_builder import build_echarts_option, can_use_echarts
+from biai.models.chart import ChartEngine
+from biai.models.message import ChatMessage
 from biai.state.database import DBState
 from biai.state.query import QueryState
 from biai.state.chart import ChartState
+from biai.state.process import ProcessState
 
 
 def _strip_latex(text: str) -> str:
@@ -27,10 +32,15 @@ def _strip_latex(text: str) -> str:
     return text
 
 
+def _make_message(**kwargs) -> dict:
+    """Create a validated message dict via ChatMessage model."""
+    return ChatMessage(**kwargs).model_dump()
+
+
 class ChatState(rx.State):
     """Manages chat messages and AI interaction."""
 
-    # Messages: list of dicts {role, content, sql, has_chart, has_table, is_error, is_streaming}
+    # Messages: list of dicts created via ChatMessage(...).model_dump()
     messages: list[dict] = []
 
     # Input
@@ -78,29 +88,17 @@ class ChatState(rx.State):
             if not question:
                 return
             # Add user message
-            self.messages.append({
-                "role": "user",
-                "content": question,
-                "sql": None,
-                "has_chart": False,
-                "has_table": False,
-                "is_error": False,
-                "is_streaming": False,
-            })
+            self.messages.append(
+                _make_message(role="user", content=question)
+            )
             self.input_value = ""
             self.is_processing = True
             self.is_streaming = True
 
             # Add placeholder AI message
-            self.messages.append({
-                "role": "assistant",
-                "content": "Analyzing your question...",
-                "sql": None,
-                "has_chart": False,
-                "has_table": False,
-                "is_error": False,
-                "is_streaming": True,
-            })
+            self.messages.append(
+                _make_message(content="Analyzing your question...", is_streaming=True)
+            )
 
         try:
             # get_state must be called inside async with self (StateProxy requirement)
@@ -118,7 +116,7 @@ class ChatState(rx.State):
             if not is_connected or not connector:
                 async with self:
                     self._update_last_message(
-                        content="Nie jesteś połączony z bazą danych. Użyj panelu Connection w sidebarze aby się połączyć.",
+                        content="Not connected to database. Please connect first using the sidebar.",
                         is_error=True,
                         is_streaming=False,
                     )
@@ -128,7 +126,7 @@ class ChatState(rx.State):
 
             from biai.ai.pipeline import AIPipeline
             from biai.models.connection import DBType
-            from biai.components.model_selector import ModelState
+            from biai.state.model import ModelState
 
             # get_state must be called inside async with self
             async with self:
@@ -184,25 +182,76 @@ class ChatState(rx.State):
                 async with self:
                     chart_state = await self.get_state(ChartState)
                 if result.chart_config and result.df is not None:
-                    plotly_data, plotly_layout = _build_plotly_figure(result.chart_config, result.df)
-                    if plotly_data:
-                        async with chart_state:
-                            chart_state.set_plotly(plotly_data, plotly_layout, result.chart_config.title)
-                    else:
-                        # Chart config existed but figure build failed (e.g. bad column names)
-                        # Try heuristic fallback
-                        from biai.ai.chart_advisor import ChartAdvisor
-                        fallback = ChartAdvisor()._heuristic_recommend(result.df, question)
-                        plotly_data, plotly_layout = _build_plotly_figure(fallback, result.df)
+                    chart_built = False
+                    cfg = result.chart_config
+
+                    # Try ECharts for simple chart types
+                    if cfg.engine == ChartEngine.ECHARTS and can_use_echarts(cfg.chart_type):
+                        echarts_opt = build_echarts_option(cfg, result.df)
+                        if echarts_opt:
+                            async with chart_state:
+                                chart_state.set_echarts(echarts_opt, cfg.title)
+                            chart_built = True
+
+                    # Fallback to Plotly
+                    if not chart_built:
+                        plotly_data, plotly_layout = build_plotly_figure(cfg, result.df)
                         if plotly_data:
                             async with chart_state:
-                                chart_state.set_plotly(plotly_data, plotly_layout, fallback.title)
-                        else:
-                            async with chart_state:
-                                chart_state.clear_chart()
+                                chart_state.set_plotly(plotly_data, plotly_layout, cfg.title)
+                            chart_built = True
+
+                    # Last resort: heuristic fallback
+                    if not chart_built:
+                        from biai.ai.chart_advisor import ChartAdvisor
+                        fallback = ChartAdvisor()._heuristic_recommend(result.df, question)
+                        if can_use_echarts(fallback.chart_type):
+                            echarts_opt = build_echarts_option(fallback, result.df)
+                            if echarts_opt:
+                                async with chart_state:
+                                    chart_state.set_echarts(echarts_opt, fallback.title)
+                                chart_built = True
+                        if not chart_built:
+                            plotly_data, plotly_layout = build_plotly_figure(fallback, result.df)
+                            if plotly_data:
+                                async with chart_state:
+                                    chart_state.set_plotly(plotly_data, plotly_layout, fallback.title)
+                            else:
+                                async with chart_state:
+                                    chart_state.clear_chart()
                 else:
                     async with chart_state:
                         chart_state.clear_chart()
+
+                # Build process flow if detected
+                has_process = False
+                async with self:
+                    process_state = await self.get_state(ProcessState)
+                if result.process_config:
+                    rf_nodes, rf_edges = result.process_config.to_react_flow_data()
+                    # Apply topological sort layout for proper positioning
+                    from biai.ai.process_layout import calculate_layout
+                    rf_nodes = calculate_layout(rf_nodes, rf_edges, direction="TB")
+                    # Find bottleneck node label
+                    bottleneck = ""
+                    for node in result.process_config.nodes:
+                        if node.is_bottleneck:
+                            bottleneck = node.label
+                            break
+                    async with process_state:
+                        process_state.set_process_data(
+                            nodes=rf_nodes,
+                            edges=rf_edges,
+                            process_name=result.process_config.title,
+                            process_type=result.process_config.process_type,
+                            bottleneck=bottleneck,
+                            transitions=len(result.process_config.edges),
+                            total_instances=result.process_config.total_instances,
+                        )
+                    has_process = True
+                else:
+                    async with process_state:
+                        process_state.clear_process()
 
                 # Stream description
                 description_parts = []
@@ -223,6 +272,7 @@ class ChatState(rx.State):
                             sql=result.sql_query.sql,
                             has_chart=result.chart_config is not None,
                             has_table=True,
+                            has_process=has_process,
                             is_streaming=True,
                         )
 
@@ -232,6 +282,7 @@ class ChatState(rx.State):
                         sql=result.sql_query.sql,
                         has_chart=result.chart_config is not None,
                         has_table=True,
+                        has_process=has_process,
                         is_streaming=False,
                     )
             else:
@@ -269,90 +320,3 @@ class ChatState(rx.State):
             msg = self.messages[-1].copy()
             msg.update(kwargs)
             self.messages[-1] = msg
-
-
-def _build_plotly_figure(chart_config, df) -> tuple[list[dict], dict]:
-    """Build Plotly figure data from ChartConfig and DataFrame."""
-    from biai.models.chart import ChartType
-
-    if chart_config.chart_type == ChartType.TABLE:
-        return [], {}
-
-    x_col = chart_config.x_column
-    y_cols = [c for c in chart_config.y_columns if c != x_col]
-
-    if not x_col or not y_cols:
-        return [], {}
-
-    if x_col not in df.columns:
-        return [], {}
-
-    x_data = df[x_col].astype(str).tolist()
-    traces: list[dict] = []
-
-    if chart_config.chart_type == ChartType.PIE:
-        if y_cols and y_cols[0] in df.columns:
-            traces.append({
-                "type": "pie",
-                "labels": x_data,
-                "values": df[y_cols[0]].tolist(),
-                "hole": 0.4,
-                "textinfo": "label+percent",
-            })
-    elif chart_config.chart_type == ChartType.SCATTER:
-        for y_col in y_cols:
-            if y_col in df.columns:
-                traces.append({
-                    "type": "scatter",
-                    "mode": "markers",
-                    "x": x_data,
-                    "y": df[y_col].tolist(),
-                    "name": y_col,
-                })
-    elif chart_config.chart_type == ChartType.AREA:
-        for y_col in y_cols:
-            if y_col in df.columns:
-                traces.append({
-                    "type": "scatter",
-                    "mode": "lines",
-                    "x": x_data,
-                    "y": df[y_col].tolist(),
-                    "name": y_col,
-                    "fill": "tozeroy",
-                })
-    elif chart_config.chart_type == ChartType.LINE:
-        for y_col in y_cols:
-            if y_col in df.columns:
-                traces.append({
-                    "type": "scatter",
-                    "mode": "lines+markers",
-                    "x": x_data,
-                    "y": df[y_col].tolist(),
-                    "name": y_col,
-                })
-    else:
-        # BAR (default)
-        for y_col in y_cols:
-            if y_col in df.columns:
-                traces.append({
-                    "type": "bar",
-                    "x": x_data,
-                    "y": df[y_col].tolist(),
-                    "name": y_col,
-                })
-
-    layout = {
-        "title": {"text": chart_config.title},
-        "template": "plotly_dark",
-        "paper_bgcolor": "rgba(0,0,0,0)",
-        "plot_bgcolor": "rgba(0,0,0,0)",
-        "font": {"color": "#e0e0e0"},
-        "margin": {"l": 50, "r": 30, "t": 50, "b": 50},
-        "showlegend": len(traces) > 1,
-    }
-
-    if chart_config.chart_type != ChartType.PIE:
-        layout["xaxis"] = {"gridcolor": "#333", "linecolor": "#555"}
-        layout["yaxis"] = {"gridcolor": "#333", "linecolor": "#555"}
-
-    return traces, layout

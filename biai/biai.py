@@ -21,7 +21,7 @@ app = rx.App(
             "background": "var(--accent-5)",
         },
     },
-    stylesheets=["/styles/global.css"],
+    stylesheets=["/styles/global.css", "/styles/process-flow.css"],
 )
 
 app.add_page(index, route="/", title="BIAI - Business Intelligence AI")

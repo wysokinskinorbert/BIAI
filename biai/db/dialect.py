@@ -18,6 +18,7 @@ class DialectHelper:
         "Use DUAL table for SELECT without FROM: SELECT 1 FROM DUAL.",
         "Use ROWNUM or ROW_NUMBER() OVER() for row numbering.",
         "Use || for string concatenation.",
+        "NEVER use bind variable syntax (:param_name). Use literal values directly in WHERE clauses.",
     ]
 
     POSTGRESQL_RULES = [

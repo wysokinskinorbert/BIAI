@@ -1,7 +1,7 @@
 """Application constants."""
 
 # AI Pipeline
-MAX_RETRIES: int = 3
+MAX_RETRIES: int = 5
 DEFAULT_MODEL: str = "qwen2.5-coder:7b-instruct-q4_K_M"
 DEFAULT_OLLAMA_HOST: str = "http://localhost:11434"
 DEFAULT_CHROMA_HOST: str = "http://localhost:8000"
@@ -42,6 +42,17 @@ BLOCKED_KEYWORDS: list[str] = [
     "xp_cmdshell",
     "sp_execute",
 ]
+
+# Process Visualization
+MAX_PROCESS_NODES: int = 50
+PROCESS_DETECTION_ENABLED: bool = True
+
+# Dynamic Process Discovery
+USE_DYNAMIC_DISCOVERY: bool = True
+DISCOVERY_MAX_TABLES: int = 50
+DISCOVERY_MAX_CARDINALITY: int = 30
+DISCOVERY_QUERY_TIMEOUT: int = 10
+DISCOVERY_CACHE_TTL: int = 600  # 10 minutes
 
 BLOCKED_PATTERNS: list[str] = [
     r";\s*\w",  # multiple statements

@@ -26,6 +26,44 @@ def process_flow_card() -> rx.Component:
             rx.icon("workflow", size=16, color="var(--accent-9)"),
             rx.text(ProcessState.process_name, size="3", weight="bold"),
             rx.spacer(),
+            # Animation toggle (play/pause)
+            rx.tooltip(
+                rx.icon_button(
+                    rx.cond(
+                        ProcessState.show_animation,
+                        rx.icon("pause", size=14),
+                        rx.icon("play", size=14),
+                    ),
+                    variant="ghost",
+                    size="1",
+                    on_click=ProcessState.toggle_animation,
+                    color=rx.cond(ProcessState.show_animation, "var(--accent-9)", "inherit"),
+                ),
+                content="Toggle flow animation",
+            ),
+            # Compare button (visible when previous process exists)
+            rx.cond(
+                ProcessState.has_previous_process,
+                rx.tooltip(
+                    rx.icon_button(
+                        rx.icon("git-compare", size=14),
+                        variant="ghost",
+                        size="1",
+                        on_click=ProcessState.toggle_comparison,
+                        color=rx.cond(ProcessState.show_comparison, "var(--accent-9)", "inherit"),
+                    ),
+                    content="Compare with previous process",
+                ),
+            ),
+            rx.tooltip(
+                rx.icon_button(
+                    rx.icon("download", size=14),
+                    variant="ghost",
+                    size="1",
+                    on_click=rx.call_script("window.exportFlowToPng()"),
+                ),
+                content="Export as PNG",
+            ),
             rx.tooltip(
                 rx.icon_button(
                     rx.icon("arrow-down-up", size=14),
@@ -40,7 +78,7 @@ def process_flow_card() -> rx.Component:
             padding="8px 12px",
             border_bottom="1px solid var(--gray-a5)",
         ),
-        # React Flow canvas
+        # React Flow canvas (with animation class)
         rx.box(
             react_flow_provider(
                 react_flow(
@@ -69,6 +107,7 @@ def process_flow_card() -> rx.Component:
             height="400px",
             border_radius="8px",
             overflow="hidden",
+            class_name=ProcessState.animation_class,
         ),
         # Metrics bar
         rx.cond(

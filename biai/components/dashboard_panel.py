@@ -1,12 +1,19 @@
-"""Dashboard panel with chart, data table, and SQL viewer."""
+"""Dashboard panel with chart, data table, process flow, ERD, and SQL viewer."""
 
 import reflex as rx
 
 from biai.state.query import QueryState
 from biai.state.chart import ChartState
+from biai.state.process import ProcessState
+from biai.state.process_map import ProcessMapState
+from biai.state.schema import SchemaState
 from biai.components.chart_card import chart_card
 from biai.components.data_table import data_table
 from biai.components.sql_viewer import sql_viewer
+from biai.components.react_flow.process_flow import process_flow_card
+from biai.components.react_flow.process_comparison import process_comparison_card
+from biai.components.process_map_card import process_map_card
+from biai.components.erd_diagram import erd_card
 
 
 def dashboard_panel() -> rx.Component:
@@ -50,7 +57,32 @@ def dashboard_panel() -> rx.Component:
                     # Chart card (always rendered, visibility via CSS to avoid hooks warning)
                     rx.box(
                         chart_card(),
-                        display=rx.cond(ChartState.show_plotly, "block", "none"),
+                        display=rx.cond(ChartState.has_chart, "block", "none"),
+                        width="100%",
+                    ),
+
+                    # Process map card (discovery)
+                    rx.box(
+                        process_map_card(),
+                        display=rx.cond(
+                            ProcessMapState.show_map_or_discovering,
+                            "block",
+                            "none",
+                        ),
+                        width="100%",
+                    ),
+
+                    # Process flow card (visibility via CSS)
+                    rx.box(
+                        process_flow_card(),
+                        display=rx.cond(ProcessState.show_process, "block", "none"),
+                        width="100%",
+                    ),
+
+                    # Process comparison card (side-by-side)
+                    rx.box(
+                        process_comparison_card(),
+                        display=rx.cond(ProcessState.show_comparison, "block", "none"),
                         width="100%",
                     ),
 
@@ -69,8 +101,17 @@ def dashboard_panel() -> rx.Component:
                     padding="16px",
                 ),
 
-                # No data: empty state
-                _empty_dashboard(),
+                # No data: show ERD if schema available, else empty state
+                rx.cond(
+                    SchemaState.has_erd,
+                    rx.vstack(
+                        erd_card(),
+                        width="100%",
+                        spacing="4",
+                        padding="16px",
+                    ),
+                    _empty_dashboard(),
+                ),
             ),
             flex="1",
             overflow_y="auto",

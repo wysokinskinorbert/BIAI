@@ -61,6 +61,16 @@ def chat_message(message: dict) -> rx.Component:
                                 color_scheme="blue",
                             ),
                         ),
+                        rx.cond(
+                            message["has_process"],
+                            rx.badge(
+                                rx.icon("workflow", size=12),
+                                "Process",
+                                variant="surface",
+                                size="1",
+                                color_scheme="purple",
+                            ),
+                        ),
                         spacing="1",
                         padding_top="8px",
                     ),

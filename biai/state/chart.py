@@ -13,23 +13,53 @@ class ChartState(rx.State):
     plotly_fig_data: dict = {}
     show_plotly: bool = False
 
+    # ECharts option dict (JSON-serializable)
+    echarts_option: dict = {}
+    show_echarts: bool = False
+
+    # Engine selector: "plotly" or "echarts"
+    chart_engine: str = "echarts"
+
     # Chart info
     chart_title: str = ""
 
-    # Version counter – forces React key change → Plotly component re-mount
+    # Version counter – forces React key change → component re-mount
     chart_version: int = 0
+
+    # Fullscreen dialog
+    show_fullscreen: bool = False
 
     def set_plotly(self, data: list[dict], layout: dict[str, Any], title: str = ""):
         self.plotly_fig_data = {"data": data, "layout": layout}
         self.show_plotly = True
+        self.show_echarts = False
+        self.chart_engine = "plotly"
+        self.chart_title = title
+        self.chart_version += 1
+
+    def set_echarts(self, option: dict, title: str = ""):
+        self.echarts_option = option
+        self.show_echarts = True
+        self.show_plotly = False
+        self.chart_engine = "echarts"
         self.chart_title = title
         self.chart_version += 1
 
     def clear_chart(self):
         self.plotly_fig_data = {}
+        self.echarts_option = {}
         self.show_plotly = False
+        self.show_echarts = False
+        self.chart_engine = "echarts"
         self.chart_title = ""
         self.chart_version += 1
+
+    def toggle_fullscreen(self):
+        self.show_fullscreen = not self.show_fullscreen
+
+    @rx.var
+    def has_chart(self) -> bool:
+        return self.show_plotly or self.show_echarts
 
     @rx.var
     def plotly_figure(self) -> go.Figure:
