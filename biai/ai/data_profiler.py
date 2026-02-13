@@ -1,7 +1,9 @@
 """Auto-profiling engine for database tables and columns."""
 
+import json
 import re
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pandas as pd
 
@@ -13,6 +15,8 @@ from biai.models.profile import (
 from biai.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+_BIAI_DIR = Path.home() / ".biai"
 
 # Patterns for semantic type detection (column name based)
 _NAME_PATTERNS: dict[SemanticType, list[str]] = {
@@ -219,6 +223,35 @@ class DataProfiler:
             return SemanticType.CATEGORY
 
         return SemanticType.TEXT if non_null.dtype == object else SemanticType.UNKNOWN
+
+    # --- Disk caching ---
+
+    @staticmethod
+    def save_cache(profiles: dict[str, TableProfile], db_name: str) -> None:
+        """Save profiles to ~/.biai/profiles_{db_name}.json."""
+        _BIAI_DIR.mkdir(parents=True, exist_ok=True)
+        path = _BIAI_DIR / f"profiles_{db_name}.json"
+        data = {
+            tname: tp.model_dump() for tname, tp in profiles.items()
+        }
+        path.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
+        logger.info("profiles_cached", path=str(path), tables=len(data))
+
+    @staticmethod
+    def load_cache(db_name: str) -> dict[str, TableProfile] | None:
+        """Load cached profiles if available."""
+        path = _BIAI_DIR / f"profiles_{db_name}.json"
+        if not path.exists():
+            return None
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            return {
+                tname: TableProfile.model_validate(tdata)
+                for tname, tdata in raw.items()
+            }
+        except Exception as e:
+            logger.warning("profiles_cache_load_failed", error=str(e))
+            return None
 
     @staticmethod
     def _detect_anomalies(

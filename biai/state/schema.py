@@ -127,6 +127,14 @@ class SchemaState(rx.State):
         prof = self.selected_profile
         if not prof:
             return []
+        # Build glossary column lookup
+        gl = self.selected_glossary
+        glossary_cols: dict[str, dict] = {}
+        if gl:
+            for gc in gl.get("columns", []):
+                cname = gc.get("name", "")
+                if cname:
+                    glossary_cols[cname] = gc
         result: list[dict[str, str]] = []
         for cp in prof.get("column_profiles", []):
             stats = cp.get("stats", {})
@@ -136,8 +144,14 @@ class SchemaState(rx.State):
             null_pct = float(stats.get("null_pct", 0.0))
             distinct = int(stats.get("distinct_count", 0))
 
+            # Look up glossary description for this column
+            col_name = str(cp.get("column_name", ""))
+            gl_col = glossary_cols.get(col_name, {})
+            col_desc = str(gl_col.get("description", "")) if gl_col else ""
+            col_bname = str(gl_col.get("business_name", "")) if gl_col else ""
+
             flat: dict[str, str] = {
-                "column_name": str(cp.get("column_name", "")),
+                "column_name": col_name,
                 "data_type": str(cp.get("data_type", "")),
                 "semantic_type": str(cp.get("semantic_type", "unknown")),
                 "null_pct": f"{null_pct:.1f}",
@@ -154,6 +168,9 @@ class SchemaState(rx.State):
                 "null_pct_high": "1" if null_pct > 50 else "",
                 "has_nulls": "1" if null_pct > 0 else "",
                 "has_mean": "1" if mean_val is not None else "",
+                "business_desc": col_desc,
+                "business_name": col_bname,
+                "has_glossary": "1" if col_desc else "",
             }
             result.append(flat)
         return result
@@ -294,6 +311,29 @@ class SchemaState(rx.State):
 
                     tbl_columns[table.name] = cols
 
+                # Try loading cached profiles and glossary
+                cached_profiles: dict[str, dict] = {}
+                cached_glossary: dict[str, dict] = {}
+                db_name = config.database or "default"
+                try:
+                    from biai.ai.data_profiler import DataProfiler
+                    cached = DataProfiler.load_cache(db_name)
+                    if cached:
+                        cached_profiles = {
+                            k: v.model_dump() for k, v in cached.items()
+                        }
+                except Exception:
+                    pass
+                try:
+                    from biai.ai.business_glossary import BusinessGlossaryGenerator
+                    gl = BusinessGlossaryGenerator.load_cache(db_name)
+                    if gl:
+                        cached_glossary = {
+                            td.name: td.model_dump() for td in gl.tables
+                        }
+                except Exception:
+                    pass
+
                 async with self:
                     self.tables = tables_flat
                     self.table_columns = tbl_columns
@@ -303,6 +343,10 @@ class SchemaState(rx.State):
                     self.selected_glossary = {}
                     self.schema_error = ""
                     self.is_loading = False
+                    if cached_profiles and not self.profiles:
+                        self.profiles = cached_profiles
+                    if cached_glossary and not self.glossary:
+                        self.glossary = cached_glossary
                     self._compute_erd()
             finally:
                 await connector.disconnect()
@@ -361,6 +405,16 @@ class SchemaState(rx.State):
                         profiles_dict[table.name] = profile.model_dump()
                     except Exception:
                         pass
+
+                # Save to disk cache
+                try:
+                    from biai.models.profile import TableProfile as TPModel
+                    tp_objs = {
+                        k: TPModel.model_validate(v) for k, v in profiles_dict.items()
+                    }
+                    DataProfiler.save_cache(tp_objs, config.database or "default")
+                except Exception:
+                    pass
 
                 async with self:
                     self.profiles = profiles_dict

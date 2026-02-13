@@ -291,9 +291,33 @@ def _column_profile_card(profile: dict) -> rx.Component:
     return rx.vstack(
         rx.hstack(
             rx.icon("columns-3", size=12, color="var(--accent-9)"),
-            rx.text(profile["column_name"], size="1", weight="bold"),
-            rx.text(profile["data_type"], size="1", color="var(--gray-9)"),
+            rx.vstack(
+                rx.hstack(
+                    rx.text(profile["column_name"], size="1", weight="bold"),
+                    rx.cond(
+                        profile["business_name"] != "",
+                        rx.text(
+                            profile["business_name"],
+                            size="1",
+                            color="var(--accent-11)",
+                            weight="medium",
+                        ),
+                    ),
+                    spacing="2",
+                    align="center",
+                ),
+                rx.cond(
+                    profile["has_glossary"] != "",
+                    rx.text(
+                        profile["business_desc"],
+                        size="1",
+                        color="var(--gray-10)",
+                    ),
+                ),
+                spacing="0",
+            ),
             rx.spacer(),
+            rx.text(profile["data_type"], size="1", color="var(--gray-9)"),
             rx.badge(profile["semantic_type"], size="1", variant="outline"),
             align="center",
             spacing="2",
