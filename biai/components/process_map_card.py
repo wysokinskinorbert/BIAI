@@ -36,7 +36,7 @@ def process_map_card() -> rx.Component:
                 ProcessMapState.discovery_error != "",
                 rx.callout(
                     ProcessMapState.discovery_error,
-                    icon="alert-triangle",
+                    icon="triangle-alert",
                     color_scheme="orange",
                     size="1",
                 ),

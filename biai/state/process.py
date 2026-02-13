@@ -175,3 +175,151 @@ class ProcessState(rx.State):
     def selected_node_duration(self) -> str:
         metrics = self.selected_node_data.get("metrics", {})
         return metrics.get("avg_duration", "")
+
+    # --- Edit Mode ---
+    is_edit_mode: bool = False
+    undo_stack: list[dict] = []  # list of {nodes, edges} snapshots
+    redo_stack: list[dict] = []
+    edit_node_label: str = ""
+    editing_node_id: str = ""
+
+    def toggle_edit_mode(self):
+        self.is_edit_mode = not self.is_edit_mode
+        if self.is_edit_mode:
+            self._save_undo_snapshot()
+
+    def _save_undo_snapshot(self):
+        """Save current state to undo stack."""
+        snapshot = {
+            "nodes": [n.copy() for n in self.flow_nodes],
+            "edges": [e.copy() for e in self.flow_edges],
+        }
+        self.undo_stack.append(snapshot)
+        if len(self.undo_stack) > 20:
+            self.undo_stack = self.undo_stack[-20:]
+        self.redo_stack = []
+
+    def undo(self):
+        if not self.undo_stack:
+            return
+        # Save current to redo
+        self.redo_stack.append({
+            "nodes": [n.copy() for n in self.flow_nodes],
+            "edges": [e.copy() for e in self.flow_edges],
+        })
+        snapshot = self.undo_stack.pop()
+        self.flow_nodes = snapshot["nodes"]
+        self.flow_edges = snapshot["edges"]
+        self.process_version += 1
+
+    def redo(self):
+        if not self.redo_stack:
+            return
+        self.undo_stack.append({
+            "nodes": [n.copy() for n in self.flow_nodes],
+            "edges": [e.copy() for e in self.flow_edges],
+        })
+        snapshot = self.redo_stack.pop()
+        self.flow_nodes = snapshot["nodes"]
+        self.flow_edges = snapshot["edges"]
+        self.process_version += 1
+
+    def add_node(self, node_type: str = "processTask"):
+        """Add a new node to the flow."""
+        self._save_undo_snapshot()
+        import uuid
+        node_id = f"new-{uuid.uuid4().hex[:6]}"
+
+        # Position: below existing nodes
+        max_y = max((n.get("position", {}).get("y", 0) for n in self.flow_nodes), default=0)
+        new_node = {
+            "id": node_id,
+            "type": node_type,
+            "position": {"x": 200, "y": max_y + 120},
+            "data": {
+                "label": "New Node",
+                "color": "#6b7280",
+                "metrics": {},
+            },
+        }
+        self.flow_nodes = self.flow_nodes + [new_node]
+        self.process_version += 1
+
+    def delete_selected_node(self):
+        """Delete the currently selected node and its edges."""
+        if not self.selected_node_id:
+            return
+        self._save_undo_snapshot()
+        nid = self.selected_node_id
+        self.flow_nodes = [n for n in self.flow_nodes if n.get("id") != nid]
+        self.flow_edges = [
+            e for e in self.flow_edges
+            if e.get("source") != nid and e.get("target") != nid
+        ]
+        self.selected_node_id = ""
+        self.selected_node_data = {}
+        self.process_version += 1
+
+    def start_edit_label(self):
+        """Start inline editing of selected node label."""
+        if self.selected_node_id:
+            self.editing_node_id = self.selected_node_id
+            self.edit_node_label = self.selected_node_data.get("label", "")
+
+    def set_edit_node_label(self, value: str):
+        self.edit_node_label = value
+
+    def confirm_edit_label(self):
+        """Apply edited label to the node."""
+        if not self.editing_node_id:
+            return
+        self._save_undo_snapshot()
+        for i, node in enumerate(self.flow_nodes):
+            if node.get("id") == self.editing_node_id:
+                updated = node.copy()
+                data = updated.get("data", {}).copy()
+                data["label"] = self.edit_node_label
+                updated["data"] = data
+                self.flow_nodes[i] = updated
+                break
+        self.editing_node_id = ""
+        self.edit_node_label = ""
+        self.process_version += 1
+
+    def cancel_edit_label(self):
+        self.editing_node_id = ""
+        self.edit_node_label = ""
+
+    def connect_nodes(self, source_id: str, target_id: str):
+        """Add an edge between two nodes."""
+        self._save_undo_snapshot()
+        edge_id = f"e-{source_id}-{target_id}"
+        # Avoid duplicates
+        for e in self.flow_edges:
+            if e.get("id") == edge_id:
+                return
+        new_edge = {
+            "id": edge_id,
+            "source": source_id,
+            "target": target_id,
+            "type": "smoothstep",
+            "animated": True,
+            "style": {"stroke": "#6b7280", "strokeWidth": 2},
+        }
+        self.flow_edges = self.flow_edges + [new_edge]
+        self.process_version += 1
+
+    def on_connect(self, params: dict):
+        """Handle new connection from React Flow."""
+        source = params.get("source", "")
+        target = params.get("target", "")
+        if source and target:
+            self.connect_nodes(source, target)
+
+    @rx.var
+    def can_undo(self) -> bool:
+        return len(self.undo_stack) > 0
+
+    @rx.var
+    def can_redo(self) -> bool:
+        return len(self.redo_stack) > 0

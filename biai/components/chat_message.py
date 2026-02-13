@@ -29,7 +29,7 @@ def chat_message(message: dict) -> rx.Component:
                 rx.cond(
                     message["is_error"],
                     rx.hstack(
-                        rx.icon("alert-triangle", size=16, color="var(--red-9)"),
+                        rx.icon("triangle-alert", size=16, color="var(--red-9)"),
                         rx.text("Error", size="2", weight="bold", color="var(--red-11)"),
                         spacing="1",
                         align="center",
@@ -104,6 +104,36 @@ def chat_message(message: dict) -> rx.Component:
                     ),
                 ),
 
+                # Insights section (shown under last message)
+                rx.cond(
+                    (message["has_table"]) & (~message["is_streaming"]) & (ChatState.insights.length() > 0),
+                    rx.vstack(
+                        rx.separator(),
+                        rx.hstack(
+                            rx.icon("lightbulb", size=14, color="var(--amber-9)"),
+                            rx.text("Insights", size="2", weight="bold", color="var(--amber-11)"),
+                            spacing="2",
+                            align="center",
+                        ),
+                        rx.foreach(
+                            ChatState.insights,
+                            _insight_item,
+                        ),
+                        width="100%",
+                        spacing="1",
+                        padding_top="8px",
+                    ),
+                ),
+
+                # Data Story section (when story_mode is active)
+                rx.cond(
+                    (message["has_table"])
+                    & (~message["is_streaming"])
+                    & (ChatState.story_mode)
+                    & (ChatState.story_context != ""),
+                    _story_section(),
+                ),
+
                 # Retry button for errors
                 rx.cond(
                     message["is_error"] & (message["question"] != ""),
@@ -150,4 +180,120 @@ def chat_message(message: dict) -> rx.Component:
         ),
         width="100%",
         padding="4px 0",
+    )
+
+
+# Insight severity → color scheme
+_SEVERITY_COLORS = {"info": "blue", "warning": "orange", "critical": "red"}
+
+
+def _insight_item(insight: dict) -> rx.Component:
+    """Render a single insight card."""
+    return rx.hstack(
+        rx.icon(
+            rx.cond(
+                insight["type"] == "anomaly", "triangle-alert",
+                rx.cond(
+                    insight["type"] == "trend", "trending-up",
+                    rx.cond(
+                        insight["type"] == "correlation", "git-branch",
+                        rx.cond(
+                            insight["type"] == "pareto", "pie-chart",
+                            "bar-chart-3",
+                        ),
+                    ),
+                ),
+            ),
+            size=12,
+            color=rx.cond(
+                insight["severity"] == "warning",
+                "var(--orange-9)",
+                rx.cond(
+                    insight["severity"] == "critical",
+                    "var(--red-9)",
+                    "var(--blue-9)",
+                ),
+            ),
+        ),
+        rx.vstack(
+            rx.text(insight["title"], size="1", weight="bold"),
+            rx.text(insight["description"], size="1", color="var(--gray-11)"),
+            spacing="0",
+        ),
+        spacing="2",
+        align="start",
+        padding="4px 8px",
+        border_radius="6px",
+        bg="var(--gray-a2)",
+        width="100%",
+    )
+
+
+def _story_section() -> rx.Component:
+    """Render data storytelling narrative section."""
+    return rx.vstack(
+        rx.separator(),
+        rx.hstack(
+            rx.icon("book-open", size=14, color="var(--violet-9)"),
+            rx.text("Data Story", size="2", weight="bold", color="var(--violet-11)"),
+            spacing="2",
+            align="center",
+        ),
+        # Context
+        rx.cond(
+            ChatState.story_context != "",
+            rx.text(
+                ChatState.story_context,
+                size="2",
+                color="var(--gray-11)",
+                padding="4px 0",
+            ),
+        ),
+        # Key findings
+        rx.cond(
+            ChatState.story_key_findings.length() > 0,
+            rx.vstack(
+                rx.text("Key Findings", size="1", weight="bold", color="var(--gray-10)"),
+                rx.foreach(
+                    ChatState.story_key_findings,
+                    lambda finding: rx.hstack(
+                        rx.icon("circle-check", size=10, color="var(--green-9)"),
+                        rx.text(finding, size="1", color="var(--gray-11)"),
+                        spacing="2",
+                        align="start",
+                    ),
+                ),
+                spacing="1",
+            ),
+        ),
+        # Implications
+        rx.cond(
+            ChatState.story_implications != "",
+            rx.text(
+                ChatState.story_implications,
+                size="1",
+                color="var(--gray-10)",
+                font_style="italic",
+            ),
+        ),
+        # Recommendations
+        rx.cond(
+            ChatState.story_recommendations.length() > 0,
+            rx.vstack(
+                rx.text("Recommendations", size="1", weight="bold", color="var(--accent-10)"),
+                rx.foreach(
+                    ChatState.story_recommendations,
+                    lambda rec: rx.hstack(
+                        rx.icon("arrow-right", size=10, color="var(--accent-9)"),
+                        rx.text(rec, size="1", color="var(--gray-11)"),
+                        spacing="2",
+                        align="start",
+                    ),
+                ),
+                spacing="1",
+            ),
+        ),
+        width="100%",
+        spacing="2",
+        padding_top="8px",
     )

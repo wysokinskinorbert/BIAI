@@ -5,7 +5,7 @@ import re
 import reflex as rx
 
 from biai.ai.chart_builder import build_plotly_figure
-from biai.ai.echarts_builder import build_echarts_option, can_use_echarts
+from biai.ai.echarts_builder import add_chart_annotations, build_echarts_option, can_use_echarts
 from biai.models.chart import ChartEngine
 from biai.models.message import ChatMessage
 from biai.state.database import DBState
@@ -97,6 +97,45 @@ class ChatState(rx.State):
     # Suggested follow-up queries (drill-down)
     suggested_queries: list[str] = []
 
+    # --- Multi-turn conversation context ---
+    conversation_context: list[dict] = []  # [{question, sql, columns, row_count}]
+    _CONTEXT_LIMIT: int = 5  # keep last N exchanges
+
+    # --- Insight display --- (dict[str, str] for Reflex foreach compatibility)
+    insights: list[dict[str, str]] = []
+
+    # --- Multi-step analysis progress ---
+    analysis_steps: list[dict] = []  # [{step, description, status, result_summary}]
+    is_multi_step: bool = False
+
+    # --- Story mode ---
+    story_mode: bool = False
+    story_data: dict = {
+        "context": "",
+        "key_findings": [],
+        "implications": "",
+        "recommendations": [],
+        "narrative_type": "general",
+        "raw_text": "",
+    }
+
+    # --- Story data computed vars (typed for Reflex foreach) ---
+    @rx.var
+    def story_context(self) -> str:
+        return str(self.story_data.get("context", ""))
+
+    @rx.var
+    def story_key_findings(self) -> list[str]:
+        return [str(f) for f in self.story_data.get("key_findings", [])]
+
+    @rx.var
+    def story_implications(self) -> str:
+        return str(self.story_data.get("implications", ""))
+
+    @rx.var
+    def story_recommendations(self) -> list[str]:
+        return [str(r) for r in self.story_data.get("recommendations", [])]
+
     def set_input(self, value: str):
         self.input_value = value
 
@@ -108,10 +147,26 @@ class ChatState(rx.State):
         """Cancel clear chat."""
         self.confirm_clear = False
 
+    def toggle_story_mode(self):
+        """Toggle between normal description and data storytelling mode."""
+        self.story_mode = not self.story_mode
+
     def clear_chat(self):
-        """Confirmed: clear messages."""
+        """Confirmed: clear messages and context."""
         self.messages = []
+        self.conversation_context = []
+        self.insights = []
+        self.analysis_steps = []
+        self.is_multi_step = False
         self.confirm_clear = False
+        self.story_data = {
+            "context": "",
+            "key_findings": [],
+            "implications": "",
+            "recommendations": [],
+            "narrative_type": "general",
+            "raw_text": "",
+        }
 
     def cancel_streaming(self):
         self._cancel_requested = True
@@ -154,8 +209,8 @@ class ChatState(rx.State):
             db_type_str = ""
             async with db_state:
                 is_connected = db_state.is_connected
-                connector = db_state._connector
                 db_type_str = db_state.db_type
+                connector = await db_state.get_connector()
 
             if not is_connected or not connector:
                 async with self:
@@ -203,8 +258,13 @@ class ChatState(rx.State):
                 async with self:
                     self._schema_trained = True
 
-            # Process question
-            result = await pipeline.process(question)
+            # Build conversation context for multi-turn
+            context = []
+            async with self:
+                context = list(self.conversation_context)
+
+            # Process question (with context)
+            result = await pipeline.process(question, context=context)
 
             if result.success and result.query_result:
                 # get_state must be called inside async with self
@@ -233,6 +293,8 @@ class ChatState(rx.State):
                     if cfg.engine == ChartEngine.ECHARTS and can_use_echarts(cfg.chart_type):
                         echarts_opt = build_echarts_option(cfg, result.df)
                         if echarts_opt:
+                            # Auto-annotate bar/line/area charts
+                            echarts_opt = add_chart_annotations(echarts_opt, result.df)
                             async with chart_state:
                                 chart_state.set_echarts(echarts_opt, cfg.title, len(result.df))
                             chart_built = True
@@ -252,6 +314,7 @@ class ChatState(rx.State):
                         if can_use_echarts(fallback.chart_type):
                             echarts_opt = build_echarts_option(fallback, result.df)
                             if echarts_opt:
+                                echarts_opt = add_chart_annotations(echarts_opt, result.df)
                                 async with chart_state:
                                     chart_state.set_echarts(echarts_opt, fallback.title, len(result.df))
                                 chart_built = True
@@ -335,6 +398,57 @@ class ChatState(rx.State):
                         result.query_result.columns,
                         result.query_result.row_count,
                     )
+                    # Store conversation context for multi-turn
+                    self.conversation_context.append({
+                        "question": question,
+                        "sql": result.sql_query.sql,
+                        "columns": result.query_result.columns,
+                        "row_count": result.query_result.row_count,
+                    })
+                    # Trim to last N
+                    if len(self.conversation_context) > self._CONTEXT_LIMIT:
+                        self.conversation_context = self.conversation_context[-self._CONTEXT_LIMIT:]
+
+                # Run insight agent in background (non-blocking)
+                if result.df is not None and not result.df.empty:
+                    try:
+                        from biai.ai.insight_agent import InsightAgent
+                        agent = InsightAgent()
+                        insights = agent.analyze_sync(result.df, question)
+                        insight_dicts = [i.model_dump(mode="json") for i in insights]
+                        async with self:
+                            self.insights = insight_dicts
+                        # Update chart annotations with insight data
+                        if insight_dicts:
+                            async with chart_state:
+                                if chart_state.echarts_option:
+                                    updated = add_chart_annotations(
+                                        chart_state.echarts_option, result.df, insight_dicts
+                                    )
+                                    chart_state.echarts_option = updated
+                    except Exception:
+                        pass
+
+                    # Generate data story if story_mode is active
+                    story_enabled = False
+                    async with self:
+                        story_enabled = self.story_mode
+                    if story_enabled:
+                        try:
+                            from biai.ai.storyteller import DataStoryteller
+                            storyteller = DataStoryteller(
+                                ollama_host=ollama_host,
+                                ollama_model=selected_model,
+                            )
+                            from biai.models.insight import Insight
+                            insight_objs = [Insight(**d) for d in insight_dicts] if insight_dicts else []
+                            story = await storyteller.generate_story(
+                                question=question, df=result.df, insights=insight_objs,
+                            )
+                            async with self:
+                                self.story_data = story.model_dump()
+                        except Exception:
+                            pass
             else:
                 # SQL generation or execution failed
                 error_msg = "I couldn't generate a valid query for your question."

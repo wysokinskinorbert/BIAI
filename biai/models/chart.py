@@ -15,6 +15,10 @@ class ChartType(str, Enum):
     GAUGE = "gauge"
     FUNNEL = "funnel"
     WATERFALL = "waterfall"
+    TREEMAP = "treemap"
+    SUNBURST = "sunburst"
+    RADAR = "radar"
+    PARALLEL = "parallel"
     TABLE = "table"  # fallback: no chart, just table
     PROCESS_FLOW = "process_flow"
     TIMELINE = "timeline"

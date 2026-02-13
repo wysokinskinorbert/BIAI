@@ -8,7 +8,8 @@ from biai.models.chart import ChartConfig, ChartType
 ECHARTS_TYPES = {
     ChartType.BAR, ChartType.LINE, ChartType.PIE, ChartType.SCATTER,
     ChartType.AREA, ChartType.HEATMAP, ChartType.GAUGE, ChartType.FUNNEL,
-    ChartType.WATERFALL,
+    ChartType.WATERFALL, ChartType.TREEMAP, ChartType.SUNBURST,
+    ChartType.RADAR, ChartType.PARALLEL,
 }
 
 # Dark theme colors matching the Plotly dark theme
@@ -36,6 +37,18 @@ def build_echarts_option(config: ChartConfig, df: pd.DataFrame) -> dict:
 
     if config.chart_type == ChartType.FUNNEL:
         return _build_funnel(config, df)
+
+    if config.chart_type == ChartType.TREEMAP:
+        return _build_treemap(config, df)
+
+    if config.chart_type == ChartType.SUNBURST:
+        return _build_sunburst(config, df)
+
+    if config.chart_type == ChartType.RADAR:
+        return _build_radar(config, df)
+
+    if config.chart_type == ChartType.PARALLEL:
+        return _build_parallel(config, df)
 
     # All other types need x/y columns
     x_col = config.x_column
@@ -480,6 +493,306 @@ def _build_waterfall(config: ChartConfig, df: pd.DataFrame, x_data: list, y_cols
     total_item = option["series"][1]["data"][-1]
     total_item["itemStyle"]["color"] = "#5470c6"
     total_item["itemStyle"]["borderRadius"] = [4, 4, 0, 0]
+
+    return option
+
+
+def _build_treemap(config: ChartConfig, df: pd.DataFrame) -> dict:
+    """Build ECharts treemap for hierarchical data.
+
+    Expects: 1+ categorical columns (hierarchy levels) + 1 numeric column (value).
+    If 2 cat cols: parent-child grouping. If 1 cat col: flat treemap.
+    """
+    cat_cols = df.select_dtypes(exclude=["number"]).columns.tolist()
+    num_cols = df.select_dtypes(include=["number"]).columns.tolist()
+
+    if not cat_cols or not num_cols:
+        return {}
+
+    val_col = num_cols[0]
+
+    option = _base_option(config.title)
+    option["tooltip"] = {"formatter": "{b}: {c}"}
+
+    if len(cat_cols) >= 2:
+        # Hierarchical: first cat = parent, second = child
+        parent_col, child_col = cat_cols[0], cat_cols[1]
+        tree_data = []
+        for parent, group in df.groupby(parent_col):
+            children = []
+            for _, row in group.iterrows():
+                val = float(row[val_col]) if pd.notna(row[val_col]) else 0
+                children.append({"name": str(row[child_col]), "value": abs(val)})
+            tree_data.append({
+                "name": str(parent),
+                "children": children,
+            })
+    else:
+        # Flat treemap
+        tree_data = []
+        for _, row in df.iterrows():
+            val = float(row[val_col]) if pd.notna(row[val_col]) else 0
+            tree_data.append({"name": str(row[cat_cols[0]]), "value": abs(val)})
+
+    option["series"] = [{
+        "type": "treemap",
+        "data": tree_data,
+        "roam": False,
+        "breadcrumb": {"show": True, "itemStyle": {"color": "#333", "textStyle": {"color": "#ccc"}}},
+        "label": {"show": True, "color": "#fff", "fontSize": 12},
+        "itemStyle": {"borderColor": "#1a1a2e", "borderWidth": 2, "gapWidth": 2},
+        "levels": [
+            {"itemStyle": {"borderColor": "#555", "borderWidth": 3, "gapWidth": 3}},
+            {"colorSaturation": [0.35, 0.6], "itemStyle": {"borderColorSaturation": 0.7, "gapWidth": 2}},
+        ],
+    }]
+    return option
+
+
+def _build_sunburst(config: ChartConfig, df: pd.DataFrame) -> dict:
+    """Build ECharts sunburst for nested categorical data.
+
+    Expects: 2+ categorical columns (hierarchy levels) + 1 numeric column.
+    """
+    cat_cols = df.select_dtypes(exclude=["number"]).columns.tolist()
+    num_cols = df.select_dtypes(include=["number"]).columns.tolist()
+
+    if len(cat_cols) < 2 or not num_cols:
+        # Fallback to flat sunburst if only 1 cat col
+        if cat_cols and num_cols:
+            return _build_flat_sunburst(config, df, cat_cols[0], num_cols[0])
+        return {}
+
+    val_col = num_cols[0]
+    level1_col, level2_col = cat_cols[0], cat_cols[1]
+
+    # Build hierarchy: level1 > level2
+    data = []
+    for parent, group in df.groupby(level1_col):
+        children = []
+        for _, row in group.iterrows():
+            val = float(row[val_col]) if pd.notna(row[val_col]) else 0
+            children.append({"name": str(row[level2_col]), "value": abs(val)})
+        data.append({"name": str(parent), "children": children})
+
+    option = _base_option(config.title)
+    option["tooltip"] = {"trigger": "item", "formatter": "{b}: {c}"}
+    option["series"] = [{
+        "type": "sunburst",
+        "data": data,
+        "radius": ["15%", "80%"],
+        "label": {"color": "#ccc", "fontSize": 11, "rotate": "radial"},
+        "itemStyle": {"borderColor": "#1a1a2e", "borderWidth": 2},
+        "emphasis": {"focus": "ancestor"},
+        "levels": [
+            {},
+            {"r0": "15%", "r": "45%", "label": {"fontSize": 12}},
+            {"r0": "45%", "r": "80%", "label": {"fontSize": 10}},
+        ],
+    }]
+    return option
+
+
+def _build_flat_sunburst(config: ChartConfig, df: pd.DataFrame, cat_col: str, val_col: str) -> dict:
+    """Flat sunburst for single categorical column."""
+    data = []
+    for _, row in df.iterrows():
+        val = float(row[val_col]) if pd.notna(row[val_col]) else 0
+        data.append({"name": str(row[cat_col]), "value": abs(val)})
+
+    option = _base_option(config.title)
+    option["tooltip"] = {"trigger": "item"}
+    option["series"] = [{
+        "type": "sunburst",
+        "data": data,
+        "radius": ["20%", "75%"],
+        "label": {"color": "#ccc"},
+        "itemStyle": {"borderColor": "#1a1a2e", "borderWidth": 2},
+    }]
+    return option
+
+
+def _build_radar(config: ChartConfig, df: pd.DataFrame) -> dict:
+    """Build ECharts radar for multi-dimensional comparison.
+
+    Expects: 1 categorical column (row labels) + 3+ numeric columns (dimensions).
+    Best with < 10 rows.
+    """
+    cat_cols = df.select_dtypes(exclude=["number"]).columns.tolist()
+    num_cols = df.select_dtypes(include=["number"]).columns.tolist()
+
+    if len(num_cols) < 3:
+        return {}
+
+    # Use up to 8 dimensions and 6 rows
+    dimensions = num_cols[:8]
+    plot_df = df.head(6)
+
+    # Build indicator (axes) with max values
+    indicators = []
+    for col in dimensions:
+        col_max = float(df[col].max()) if not df[col].dropna().empty else 100
+        indicators.append({"name": col, "max": col_max * 1.2 if col_max > 0 else 100})
+
+    # Build series data
+    series_data = []
+    for idx, row in plot_df.iterrows():
+        label = str(row[cat_cols[0]]) if cat_cols else f"Row {idx}"
+        values = [float(row[c]) if pd.notna(row[c]) else 0 for c in dimensions]
+        series_data.append({"name": label, "value": values})
+
+    option = _base_option(config.title)
+    option["tooltip"] = {"trigger": "item"}
+    option["legend"] = {
+        "data": [d["name"] for d in series_data],
+        "textStyle": {"color": "#ccc"},
+        "bottom": 0,
+    }
+    option["radar"] = {
+        "indicator": indicators,
+        "shape": "polygon",
+        "splitNumber": 4,
+        "axisName": {"color": "#999", "fontSize": 11},
+        "splitLine": {"lineStyle": {"color": "#444"}},
+        "splitArea": {"show": True, "areaStyle": {"color": ["rgba(50,50,80,0.3)", "rgba(50,50,80,0.1)"]}},
+        "axisLine": {"lineStyle": {"color": "#555"}},
+    }
+    option["series"] = [{
+        "type": "radar",
+        "data": series_data,
+        "emphasis": {"lineStyle": {"width": 3}},
+        "areaStyle": {"opacity": 0.15},
+    }]
+    return option
+
+
+def _build_parallel(config: ChartConfig, df: pd.DataFrame) -> dict:
+    """Build ECharts parallel coordinates for multi-dimensional analysis.
+
+    Expects: 4+ numeric columns. Optional 1 categorical for color grouping.
+    """
+    num_cols = df.select_dtypes(include=["number"]).columns.tolist()
+    cat_cols = df.select_dtypes(exclude=["number"]).columns.tolist()
+
+    if len(num_cols) < 4:
+        return {}
+
+    dimensions = num_cols[:8]
+    plot_df = df.head(200)  # limit rows for performance
+
+    # Build parallel axes
+    parallel_axis = []
+    for i, col in enumerate(dimensions):
+        parallel_axis.append({
+            "dim": i,
+            "name": col,
+            "nameTextStyle": {"color": "#999", "fontSize": 11},
+            "axisLabel": {"color": "#999"},
+            "axisLine": {"lineStyle": {"color": "#555"}},
+        })
+
+    # Build data rows
+    data = []
+    for _, row in plot_df.iterrows():
+        values = [float(row[c]) if pd.notna(row[c]) else 0 for c in dimensions]
+        data.append(values)
+
+    option = _base_option(config.title)
+    option["parallelAxis"] = parallel_axis
+    option["parallel"] = {
+        "left": "5%",
+        "right": "13%",
+        "bottom": "10%",
+        "top": "15%",
+        "parallelAxisDefault": {
+            "type": "value",
+            "nameLocation": "end",
+            "nameGap": 20,
+            "axisLine": {"lineStyle": {"color": "#555"}},
+            "axisTick": {"lineStyle": {"color": "#555"}},
+            "splitLine": {"show": False},
+            "axisLabel": {"color": "#999"},
+        },
+    }
+
+    # If we have a categorical column, color-code by group
+    if cat_cols:
+        group_col = cat_cols[0]
+        groups = plot_df[group_col].unique().tolist()[:6]
+        option["legend"] = {
+            "data": [str(g) for g in groups],
+            "textStyle": {"color": "#ccc"},
+            "bottom": 0,
+        }
+        option["series"] = []
+        for gi, group in enumerate(groups):
+            mask = plot_df[group_col] == group
+            group_data = []
+            for _, row in plot_df[mask].iterrows():
+                group_data.append([float(row[c]) if pd.notna(row[c]) else 0 for c in dimensions])
+            option["series"].append({
+                "name": str(group),
+                "type": "parallel",
+                "data": group_data,
+                "lineStyle": {"width": 1.5, "opacity": 0.5, "color": _COLORS[gi % len(_COLORS)]},
+                "emphasis": {"lineStyle": {"width": 3, "opacity": 1}},
+            })
+    else:
+        option["series"] = [{
+            "type": "parallel",
+            "data": data,
+            "lineStyle": {"width": 1, "opacity": 0.4},
+            "emphasis": {"lineStyle": {"width": 3, "opacity": 1}},
+        }]
+
+    option["tooltip"] = {"show": False}
+    return option
+
+
+def add_chart_annotations(option: dict, df: pd.DataFrame, insights: list[dict] | None = None) -> dict:
+    """Add markPoint/markLine annotations to an existing ECharts option.
+
+    Enhances charts with:
+    - markPoint for min/max values
+    - markLine for average
+    - markArea for anomaly regions (if insights provided)
+    """
+    if not option or "series" not in option:
+        return option
+
+    for series in option.get("series", []):
+        stype = series.get("type", "")
+        if stype not in ("bar", "line", "area"):
+            continue
+
+        # Add min/max points
+        series.setdefault("markPoint", {})
+        series["markPoint"]["data"] = [
+            {"type": "max", "name": "Max", "itemStyle": {"color": "#91cc75"}},
+            {"type": "min", "name": "Min", "itemStyle": {"color": "#ee6666"}},
+        ]
+        series["markPoint"]["symbolSize"] = 40
+        series["markPoint"]["label"] = {"color": "#fff", "fontSize": 10}
+
+        # Add average line
+        series.setdefault("markLine", {})
+        series["markLine"]["data"] = [
+            {"type": "average", "name": "Avg", "lineStyle": {"color": "#fac858", "type": "dashed"}},
+        ]
+        series["markLine"]["label"] = {"color": "#fac858", "fontSize": 10}
+
+    # Add anomaly markArea from insights if available
+    if insights:
+        for insight in insights:
+            if insight.get("type") == "anomaly" and option.get("series"):
+                first_series = option["series"][0]
+                if first_series.get("type") in ("bar", "line", "area"):
+                    first_series.setdefault("markArea", {})
+                    first_series["markArea"].setdefault("data", [])
+                    # Visual indicator — subtle red background area
+                    first_series["markArea"]["itemStyle"] = {
+                        "color": "rgba(238, 102, 102, 0.08)",
+                    }
 
     return option
 

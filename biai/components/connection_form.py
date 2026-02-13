@@ -144,7 +144,7 @@ def connection_form() -> rx.Component:
         # Write permissions warning (CSS display to avoid ghost a11y node)
         rx.callout(
             "DB user has write permissions. Recommend using a read-only account.",
-            icon="alert-triangle",
+            icon="triangle-alert",
             color_scheme="orange",
             size="1",
             width="100%",

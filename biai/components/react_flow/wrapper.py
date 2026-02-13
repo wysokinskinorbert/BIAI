@@ -31,6 +31,7 @@ class ReactFlowComponent(ReactFlowLib):
     color_mode: rx.Var[str] = "dark"  # type: ignore
     nodes_draggable: rx.Var[bool] = True  # type: ignore
     nodes_connectable: rx.Var[bool] = False  # type: ignore
+    elements_selectable: rx.Var[bool] = True  # type: ignore
     zoom_on_scroll: rx.Var[bool] = True  # type: ignore
     pan_on_drag: rx.Var[bool] = True  # type: ignore
     min_zoom: rx.Var[float] = 0.3  # type: ignore
@@ -38,6 +39,7 @@ class ReactFlowComponent(ReactFlowLib):
 
     on_nodes_change: rx.EventHandler[lambda e0: [e0]]
     on_node_click: rx.EventHandler[lambda e0, e1: [e1]]
+    on_connect: rx.EventHandler[lambda e0: [e0]]
 
     def _get_custom_code(self) -> str:
         return _REACT_FLOW_CUSTOM_CODE

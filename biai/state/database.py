@@ -25,8 +25,19 @@ class DBState(rx.State):
     connection_error: str = ""
     is_read_only: bool = True
 
-    # Connector reference (not serialized)
+    # Connector reference (transient — excluded from pickle via __getstate__)
     _connector: any = None
+
+    def __getstate__(self):
+        """Exclude unpicklable _connector from serialization."""
+        state = super().__getstate__()
+        # _connector is stored in _backend_vars; remove it for pickle
+        backend = state.get("_backend_vars")
+        if backend and "_connector" in backend:
+            backend = backend.copy()
+            backend.pop("_connector", None)
+            state["_backend_vars"] = backend
+        return state
 
     def set_db_type(self, value: str):
         if value == self.db_type:
@@ -76,6 +87,28 @@ class DBState(rx.State):
             password=self.password,
             dsn=self.dsn,
         )
+
+    async def get_connector(self):
+        """Return the active connector, reconstructing it if lost after deserialization.
+
+        _connector is excluded from pickle (asyncpg.Pool is not picklable).
+        Background tasks that retrieve DBState via get_state() will have
+        _connector = None.  This helper transparently reconnects.
+        """
+        if self._connector is not None:
+            return self._connector
+        if not self.is_connected:
+            return None
+        config = self._get_config()
+        if config.db_type == DBType.ORACLE:
+            from biai.db.oracle import OracleConnector
+            connector = OracleConnector(config)
+        else:
+            from biai.db.postgresql import PostgreSQLConnector
+            connector = PostgreSQLConnector(config)
+        await connector.connect()
+        self._connector = connector
+        return connector
 
     @rx.event(background=True)
     async def connect(self):
@@ -129,15 +162,15 @@ class DBState(rx.State):
                     async with self:
                         schema_state = await self.get_state(SchemaState)
                     tables_flat: list[dict[str, str]] = []
-                    tables_full: list[dict] = []
+                    tbl_columns: dict[str, list[dict[str, str]]] = {}
                     for table in snapshot.tables:
-                        cols = []
+                        cols: list[dict[str, str]] = []
                         for c in table.columns:
                             cols.append({
                                 "name": c.name,
                                 "data_type": c.data_type,
-                                "is_pk": c.is_primary_key,
-                                "is_fk": c.is_foreign_key,
+                                "is_pk": "1" if c.is_primary_key else "",
+                                "is_fk": "1" if c.is_foreign_key else "",
                                 "fk_ref": c.foreign_key_ref or "",
                             })
                         tables_flat.append({
@@ -145,11 +178,11 @@ class DBState(rx.State):
                             "schema": table.schema_name,
                             "col_count": str(len(cols)),
                         })
-                        tables_full.append({"name": table.name, "columns": cols})
+                        tbl_columns[table.name] = cols
 
                     async with schema_state:
                         schema_state.tables = tables_flat
-                        schema_state._tables_full = tables_full
+                        schema_state.table_columns = tbl_columns
                         schema_state.schema_error = ""
                         schema_state._compute_erd()
                 except Exception:
@@ -250,7 +283,7 @@ class DBState(rx.State):
                 schema_state = await self.get_state(SchemaState)
             async with schema_state:
                 schema_state.tables = []
-                schema_state._tables_full = []
+                schema_state.table_columns = {}
                 schema_state.selected_table = ""
                 schema_state.selected_columns = []
                 schema_state.search_query = ""

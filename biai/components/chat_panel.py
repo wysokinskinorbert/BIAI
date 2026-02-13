@@ -17,6 +17,18 @@ def chat_panel() -> rx.Component:
             rx.icon("message-square", size=20, color="var(--accent-9)"),
             rx.text("Chat", size="4", weight="bold"),
             rx.spacer(),
+            # Story mode toggle
+            rx.tooltip(
+                rx.icon_button(
+                    rx.icon("book-open", size=14),
+                    variant=rx.cond(ChatState.story_mode, "soft", "ghost"),
+                    size="1",
+                    on_click=ChatState.toggle_story_mode,
+                    color=rx.cond(ChatState.story_mode, "var(--violet-9)", "inherit"),
+                    aria_label="Toggle story mode",
+                ),
+                content="Toggle data storytelling",
+            ),
             # Saved queries button
             rx.tooltip(
                 rx.icon_button(

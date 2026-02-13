@@ -52,8 +52,7 @@ class ProcessMapState(rx.State):
             async with db_state:
                 is_connected = db_state.is_connected
                 db_type_str = db_state.db_type
-                # _connector is transient, but accessible within same async with block
-                connector = db_state._connector
+                connector = await db_state.get_connector()
 
             if not is_connected or not connector:
                 async with self:

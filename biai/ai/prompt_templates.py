@@ -44,7 +44,7 @@ CHART_ADVISOR_PROMPT = """Given the following SQL query results, recommend the b
 
 Respond in this exact JSON format:
 {{
-    "chart_type": "bar|line|pie|scatter|area|table",
+    "chart_type": "bar|line|pie|scatter|area|treemap|sunburst|radar|parallel|table",
     "x_column": "column_name_for_x_axis",
     "y_columns": ["column_name_for_y_axis"],
     "title": "Chart title",
@@ -57,6 +57,10 @@ Guidelines:
 - Use "line" for time series data
 - Use "scatter" for correlations between two numeric columns
 - Use "area" for cumulative time series
+- Use "treemap" for hierarchical data (parent-child, 2+ category columns)
+- Use "sunburst" for nested categories with values
+- Use "radar" for multi-dimensional comparison (few rows, 3+ numeric columns)
+- Use "parallel" for high-dimensional numeric data (4+ numeric columns)
 - Use "table" if data doesn't suit visualization
 """
 
@@ -114,6 +118,87 @@ PROCESS_DESCRIPTION_PROMPT = """Describe this business process based on the data
 
 Provide a 3-4 sentence business-friendly description of what this process does,
 who uses it, and what the key stages mean. Use plain text only, no markdown.
+"""
+
+
+CONTEXT_PROMPT = """The user is having a multi-turn conversation. Here is the context from previous exchanges:
+
+{context}
+
+The current question may reference previous results. Use the context to understand references like
+"the same", "that data", "those results", "compare with", "also show", "now filter by", etc.
+"""
+
+INSIGHT_PROMPT = """Analyze the following query results and provide 2-3 key business insights.
+
+**Question:** {question}
+**SQL:** {sql}
+**Columns:** {columns}
+**Row count:** {row_count}
+**Statistics:**
+{statistics}
+
+For each insight, respond in this exact JSON format:
+[
+  {{
+    "type": "anomaly|trend|correlation|pareto|distribution",
+    "title": "Short insight title (5-10 words)",
+    "description": "1-2 sentence explanation with specific numbers",
+    "severity": "info|warning|critical"
+  }}
+]
+
+Guidelines:
+- Focus on ACTIONABLE insights, not just data summaries
+- Use specific numbers (percentages, counts, values)
+- Pareto: check if 80% of results come from 20% of categories
+- Anomaly: flag values > 2 standard deviations from mean
+- Trend: note if data increases/decreases consistently
+- Keep it concise and business-friendly
+"""
+
+ANALYSIS_PLAN_PROMPT = """Break down this complex question into simple SQL query steps.
+
+**Question:** {question}
+**Available tables and columns:**
+{schema_summary}
+**Conversation context:**
+{context}
+
+Respond in this exact JSON format:
+{{
+  "is_complex": true/false,
+  "steps": [
+    {{
+      "step": 1,
+      "type": "sql",
+      "description": "What this step does",
+      "depends_on": [],
+      "question_for_sql": "Simple question that can be answered with one SQL query"
+    }}
+  ],
+  "final_combination": "How to combine the results of all steps"
+}}
+
+If the question can be answered with a single SQL query, set is_complex to false and return one step.
+Only decompose into multiple steps if the question truly requires comparing separate query results.
+"""
+
+STORYTELLING_PROMPT = """Create a data narrative from these analysis results.
+
+**Question:** {question}
+**Key findings:**
+{findings}
+**Insights:**
+{insights}
+
+Write a structured narrative with:
+1. **Context** — What was analyzed and why it matters (1 sentence)
+2. **Key Findings** — The most important discoveries with specific numbers (2-3 bullet points)
+3. **Implications** — What this means for the business (1-2 sentences)
+4. **Recommendations** — What action to take next (1-2 bullet points)
+
+Use business-friendly language. Be specific with numbers. No LaTeX or special formatting.
 """
 
 

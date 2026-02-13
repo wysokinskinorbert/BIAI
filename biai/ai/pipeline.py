@@ -155,16 +155,23 @@ class AIPipeline:
 
         return self._trainer.train_full(schema=snapshot, docs=docs, examples=examples)
 
-    async def process(self, question: str) -> PipelineResult:
+    async def process(
+        self, question: str, context: list[dict] | None = None,
+    ) -> PipelineResult:
         """Full pipeline: question → SQL → data → chart config."""
         result = PipelineResult()
         result.question = question
 
         logger.info("pipeline_process", question=question[:80])
 
+        # Build context-aware question if multi-turn
+        effective_question = question
+        if context:
+            effective_question = self._build_context_question(question, context)
+
         # Step 1: Generate and validate SQL (with self-correction)
         sql_query, errors = await self._correction.generate_with_correction(
-            question=question,
+            question=effective_question,
             db_executor=self._query_executor,
         )
         result.sql_query = sql_query
@@ -235,6 +242,26 @@ class AIPipeline:
             has_process=result.process_config is not None,
         )
         return result
+
+    @staticmethod
+    def _build_context_question(question: str, context: list[dict]) -> str:
+        """Enrich question with conversation context for multi-turn queries."""
+        if not context:
+            return question
+        from biai.ai.prompt_templates import CONTEXT_PROMPT
+
+        ctx_parts = []
+        for i, c in enumerate(context[-3:], 1):  # last 3 exchanges
+            cols = ", ".join(c.get("columns", [])[:8])
+            ctx_parts.append(
+                f"Exchange {i}: Q=\"{c['question'][:100]}\" → "
+                f"SQL=\"{c['sql'][:200]}\" → "
+                f"{c['row_count']} rows, columns=[{cols}]"
+            )
+        ctx_text = "\n".join(ctx_parts)
+
+        enriched = CONTEXT_PROMPT.format(context=ctx_text) + f"\n\nCurrent question: {question}"
+        return enriched
 
     async def generate_description(
         self,

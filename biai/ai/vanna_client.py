@@ -1,10 +1,15 @@
 """Vanna.ai client with ChromaDB + Ollama integration."""
 
+from pathlib import Path
+
 from vanna.chromadb import ChromaDB_VectorStore
 from vanna.ollama import Ollama
 
 from biai.config.constants import DEFAULT_MODEL, DEFAULT_OLLAMA_HOST, DEFAULT_CHROMA_COLLECTION
 from biai.utils.logger import get_logger
+
+# Store ChromaDB data outside project dir to avoid Reflex hot-reload triggers
+_CHROMADB_DIR = str(Path.home() / ".biai" / "chromadb")
 
 logger = get_logger(__name__)
 
@@ -66,7 +71,9 @@ def create_vanna_client(
         config["chroma_host"] = chroma_host
         if chroma_port:
             config["chroma_port"] = chroma_port
-    # else: use local persistent ChromaDB
+    else:
+        # Local persistent ChromaDB — outside project dir to avoid hot-reload
+        config["path"] = _CHROMADB_DIR
 
     config["collection_name"] = chroma_collection
 

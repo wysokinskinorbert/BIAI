@@ -73,6 +73,20 @@ def process_flow_card() -> rx.Component:
                 ),
                 content="Toggle vertical/horizontal layout",
             ),
+            # Edit mode toggle
+            rx.tooltip(
+                rx.icon_button(
+                    rx.icon(
+                        rx.cond(ProcessState.is_edit_mode, "lock-open", "pencil"),
+                        size=14,
+                    ),
+                    variant=rx.cond(ProcessState.is_edit_mode, "soft", "ghost"),
+                    size="1",
+                    on_click=ProcessState.toggle_edit_mode,
+                    color=rx.cond(ProcessState.is_edit_mode, "var(--accent-9)", "inherit"),
+                ),
+                content="Toggle edit mode",
+            ),
             width="100%",
             align="center",
             padding="8px 12px",
@@ -99,8 +113,10 @@ def process_flow_card() -> rx.Component:
                     fit_view=True,
                     color_mode=rx.color_mode_cond("light", "dark"),
                     nodes_draggable=True,
-                    nodes_connectable=False,
+                    nodes_connectable=ProcessState.is_edit_mode,
+                    elements_selectable=ProcessState.is_edit_mode,
                     on_node_click=ProcessState.on_node_click,
+                    on_connect=ProcessState.on_connect,
                 ),
             ),
             width="100%",
@@ -116,7 +132,7 @@ def process_flow_card() -> rx.Component:
                 rx.cond(
                     ProcessState.bottleneck_label != "",
                     rx.hstack(
-                        rx.icon("alert-triangle", size=14, color="#ef4444"),
+                        rx.icon("triangle-alert", size=14, color="#ef4444"),
                         rx.text(
                             "Bottleneck: ",
                             size="1",
@@ -199,6 +215,79 @@ def process_flow_card() -> rx.Component:
                 spacing="2",
                 align="center",
                 bg="var(--gray-a2)",
+            ),
+        ),
+        # Edit mode toolbar
+        rx.cond(
+            ProcessState.is_edit_mode,
+            rx.hstack(
+                rx.button(
+                    rx.icon("plus", size=12),
+                    "Add Node",
+                    variant="outline",
+                    size="1",
+                    on_click=ProcessState.add_node("processTask"),
+                ),
+                rx.cond(
+                    ProcessState.has_selected_node,
+                    rx.fragment(
+                        rx.button(
+                            rx.icon("pencil", size=12),
+                            "Rename",
+                            variant="outline",
+                            size="1",
+                            on_click=ProcessState.start_edit_label,
+                        ),
+                        rx.button(
+                            rx.icon("trash-2", size=12),
+                            "Delete",
+                            variant="outline",
+                            size="1",
+                            color_scheme="red",
+                            on_click=ProcessState.delete_selected_node,
+                        ),
+                    ),
+                ),
+                rx.spacer(),
+                rx.button(
+                    rx.icon("undo-2", size=12),
+                    variant="ghost",
+                    size="1",
+                    on_click=ProcessState.undo,
+                    disabled=~ProcessState.can_undo,
+                ),
+                rx.button(
+                    rx.icon("redo-2", size=12),
+                    variant="ghost",
+                    size="1",
+                    on_click=ProcessState.redo,
+                    disabled=~ProcessState.can_redo,
+                ),
+                width="100%",
+                padding="6px 12px",
+                border_top="1px solid var(--gray-a5)",
+                spacing="2",
+                align="center",
+                bg="var(--accent-a2)",
+            ),
+        ),
+        # Inline label editor
+        rx.cond(
+            ProcessState.editing_node_id != "",
+            rx.hstack(
+                rx.input(
+                    value=ProcessState.edit_node_label,
+                    on_change=ProcessState.set_edit_node_label,
+                    size="1",
+                    flex="1",
+                    auto_focus=True,
+                ),
+                rx.button("OK", size="1", on_click=ProcessState.confirm_edit_label),
+                rx.button("Cancel", size="1", variant="ghost", on_click=ProcessState.cancel_edit_label),
+                width="100%",
+                padding="6px 12px",
+                spacing="2",
+                bg="var(--gray-a3)",
             ),
         ),
         # Card container styles

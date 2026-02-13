@@ -5,7 +5,7 @@ import reflex as rx
 from biai.state.base import BaseState
 from biai.state.database import DBState
 from biai.components.connection_form import connection_form
-from biai.components.schema_explorer import schema_explorer
+from biai.components.data_explorer import data_explorer
 from biai.components.model_selector import model_selector
 from biai.pages.settings import SettingsState
 
@@ -38,11 +38,27 @@ def sidebar() -> rx.Component:
             # Navigation tabs
             rx.hstack(
                 _sidebar_tab("database", "Connection", "connection"),
-                _sidebar_tab("table-2", "Schema", "schema"),
+                _sidebar_tab("search", "Explorer", "schema"),
                 _sidebar_tab("settings", "Settings", "settings"),
                 width="100%",
                 padding="4px 8px",
                 spacing="2",
+            ),
+            # Dashboard Builder link
+            rx.hstack(
+                rx.link(
+                    rx.button(
+                        rx.icon("layout-dashboard", size=14),
+                        "Dashboard Builder",
+                        variant="ghost",
+                        size="1",
+                        width="100%",
+                    ),
+                    href="/dashboard",
+                    width="100%",
+                ),
+                padding="0 8px",
+                width="100%",
             ),
             rx.separator(),
 
@@ -60,7 +76,7 @@ def sidebar() -> rx.Component:
                     width="100%",
                 ),
                 rx.box(
-                    schema_explorer(),
+                    data_explorer(),
                     display=rx.cond(BaseState.sidebar_section == "schema", "block", "none"),
                     width="100%",
                 ),

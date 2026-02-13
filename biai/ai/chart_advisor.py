@@ -90,6 +90,67 @@ class ChartAdvisor:
                 title=_generate_title(question),
             )
 
+        # Treemap for hierarchical data (2+ cat cols, one numeric, many rows)
+        treemap_keywords = [
+            "treemap", "hierarchi", "nested", "drill-down", "drilldown",
+            "struktur", "drzew", "zagnieżdżon",
+        ]
+        is_treemap = any(kw in question_lower for kw in treemap_keywords)
+        auto_treemap = (
+            len(cat_cols) >= 2 and len(num_cols) >= 1
+            and len(df) > 6 and df[cat_cols[0]].nunique() >= 3
+        )
+        if is_treemap and cat_cols and num_cols:
+            return ChartConfig(
+                chart_type=ChartType.TREEMAP,
+                x_column=cat_cols[0],
+                y_columns=[num_cols[0]],
+                title=_generate_title(question),
+            )
+
+        # Sunburst for nested categories
+        sunburst_keywords = [
+            "sunburst", "nested categor", "hierarchical categor",
+            "zagnieżdżone kategori", "słoneczn",
+        ]
+        if any(kw in question_lower for kw in sunburst_keywords) and cat_cols and num_cols:
+            return ChartConfig(
+                chart_type=ChartType.SUNBURST,
+                x_column=cat_cols[0],
+                y_columns=[num_cols[0]],
+                title=_generate_title(question),
+            )
+
+        # Radar for multi-dimensional comparison (few rows, many numeric cols)
+        radar_keywords = [
+            "radar", "spider", "porownanie wielowymiarowe",
+            "multi-dimensional", "profile", "porównanie metryk",
+            "performance comparison",
+        ]
+        is_radar = any(kw in question_lower for kw in radar_keywords)
+        auto_radar = len(num_cols) >= 3 and len(df) <= 10
+        if (is_radar or (auto_radar and "compar" in question_lower)) and len(num_cols) >= 3:
+            return ChartConfig(
+                chart_type=ChartType.RADAR,
+                x_column=cat_cols[0] if cat_cols else df.columns[0],
+                y_columns=num_cols[:8],
+                title=_generate_title(question),
+            )
+
+        # Parallel coordinates for high-dimensional numeric data
+        parallel_keywords = [
+            "parallel", "korelacj", "wielowymiarow", "multi-dimension",
+            "all metrics", "wszystkie metryki",
+        ]
+        is_parallel = any(kw in question_lower for kw in parallel_keywords)
+        if is_parallel and len(num_cols) >= 4:
+            return ChartConfig(
+                chart_type=ChartType.PARALLEL,
+                x_column=cat_cols[0] if cat_cols else num_cols[0],
+                y_columns=num_cols[:8],
+                title=_generate_title(question),
+            )
+
         # Waterfall for breakdown/contribution data (before proportion — "breakdown" overlap)
         waterfall_keywords = [
             "breakdown", "contribution", "waterfall", "składniki", "rozkład kosztów",
