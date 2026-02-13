@@ -39,6 +39,7 @@ class ReactFlowComponent(ReactFlowLib):
 
     on_nodes_change: rx.EventHandler[lambda e0: [e0]]
     on_node_click: rx.EventHandler[lambda e0, e1: [e1]]
+    on_node_double_click: rx.EventHandler[lambda e0, e1: [e1]]
     on_connect: rx.EventHandler[lambda e0: [e0]]
 
     def _get_custom_code(self) -> str:
@@ -271,6 +272,85 @@ const erdNodeTypes = {
   erdTable: ERDTableNode,
 };
 
+/* --- Query Builder Block Nodes --- */
+const _blockStyle = (color) => ({
+  padding: '10px 16px', borderRadius: '8px',
+  border: `2px solid ${color}`,
+  background: `linear-gradient(135deg, ${color}15, ${color}08)`,
+  color: 'var(--gray-12)', fontSize: '12px', minWidth: '160px',
+  boxShadow: `0 2px 8px ${color}20`,
+});
+
+const _blockHeader = (icon, label, color) => (
+  <div style={{display:'flex', alignItems:'center', gap:'6px', fontWeight:600, fontSize:'13px', marginBottom:'4px'}}>
+    <span style={{color}}>{icon}</span>
+    {label}
+  </div>
+);
+
+const TableBlockNode = ({ data }) => (
+  <div style={_blockStyle(data.color || '#5470c6')}>
+    {_blockHeader('T', 'Table', data.color || '#5470c6')}
+    <div style={{opacity:0.8}}>{data.config?.table_name || '(select table)'}</div>
+    <Handle type="source" position={Position.Bottom} style={{background: data.color || '#5470c6'}} />
+  </div>
+);
+
+const FilterBlockNode = ({ data }) => (
+  <div style={_blockStyle(data.color || '#91cc75')}>
+    {_blockHeader('F', 'Filter', data.color || '#91cc75')}
+    <div style={{opacity:0.8}}>{data.config?.column ? `${data.config.column} ${data.config.operator || '='} ${data.config.value || ''}` : '(configure)'}</div>
+    <Handle type="target" position={Position.Top} style={{background: data.color || '#91cc75'}} />
+    <Handle type="source" position={Position.Bottom} style={{background: data.color || '#91cc75'}} />
+  </div>
+);
+
+const AggregateBlockNode = ({ data }) => (
+  <div style={_blockStyle(data.color || '#fac858')}>
+    {_blockHeader('A', 'Aggregate', data.color || '#fac858')}
+    <div style={{opacity:0.8}}>{data.config?.function || 'COUNT'}({data.config?.column || '*'})</div>
+    {data.config?.group_by && <div style={{opacity:0.6, fontSize:'10px'}}>GROUP BY {data.config.group_by}</div>}
+    <Handle type="target" position={Position.Top} style={{background: data.color || '#fac858'}} />
+    <Handle type="source" position={Position.Bottom} style={{background: data.color || '#fac858'}} />
+  </div>
+);
+
+const JoinBlockNode = ({ data }) => (
+  <div style={_blockStyle(data.color || '#ee6666')}>
+    {_blockHeader('J', `${data.config?.join_type || 'INNER'} JOIN`, data.color || '#ee6666')}
+    <div style={{opacity:0.8}}>{data.config?.on_left && data.config?.on_right ? `ON ${data.config.on_left} = ${data.config.on_right}` : '(configure)'}</div>
+    <Handle type="target" position={Position.Top} id="left" style={{background: data.color || '#ee6666', left: '25%'}} />
+    <Handle type="target" position={Position.Top} id="right" style={{background: data.color || '#ee6666', left: '75%'}} />
+    <Handle type="source" position={Position.Bottom} style={{background: data.color || '#ee6666'}} />
+  </div>
+);
+
+const SortBlockNode = ({ data }) => (
+  <div style={_blockStyle(data.color || '#73c0de')}>
+    {_blockHeader('S', 'Sort', data.color || '#73c0de')}
+    <div style={{opacity:0.8}}>{data.config?.column ? `${data.config.column} ${data.config.direction || 'ASC'}` : '(configure)'}</div>
+    <Handle type="target" position={Position.Top} style={{background: data.color || '#73c0de'}} />
+    <Handle type="source" position={Position.Bottom} style={{background: data.color || '#73c0de'}} />
+  </div>
+);
+
+const LimitBlockNode = ({ data }) => (
+  <div style={_blockStyle(data.color || '#3ba272')}>
+    {_blockHeader('#', 'Limit', data.color || '#3ba272')}
+    <div style={{opacity:0.8}}>{data.config?.count || 100} rows</div>
+    <Handle type="target" position={Position.Top} style={{background: data.color || '#3ba272'}} />
+  </div>
+);
+
+const queryBuilderNodeTypes = {
+  tableBlock: TableBlockNode,
+  filterBlock: FilterBlockNode,
+  aggregateBlock: AggregateBlockNode,
+  joinBlock: JoinBlockNode,
+  sortBlock: SortBlockNode,
+  limitBlock: LimitBlockNode,
+};
+
 /* --- Token animation on edges --- */
 const tokenAnimationStyle = document.createElement('style');
 tokenAnimationStyle.textContent = `
@@ -312,6 +392,25 @@ window.exportFlowToPng = function() {
     });
   }).catch(function(err) {
     console.error('Export to PNG failed:', err);
+  });
+};
+
+window.exportFlowToSvg = function() {
+  const el = document.querySelector('.react-flow');
+  if (!el) return;
+  import('https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/+esm').then(function(mod) {
+    mod.toSvg(el, {
+      backgroundColor: '#111',
+    }).then(function(dataUrl) {
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = 'biai-flow-export.svg';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    });
+  }).catch(function(err) {
+    console.error('Export to SVG failed:', err);
   });
 };
 """

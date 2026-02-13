@@ -121,6 +121,27 @@ class ProcessState(rx.State):
         self.selected_node_id = node.get("id", "")
         self.selected_node_data = node.get("data", {})
 
+    def on_node_double_click(self, node: dict):
+        """Start label editing on double-click."""
+        self.selected_node_id = node.get("id", "")
+        self.selected_node_data = node.get("data", {})
+        if self.is_edit_mode:
+            self.start_edit_label()
+
+    def on_nodes_change(self, changes: list[dict]):
+        """Persist node position after drag ends."""
+        for change in changes:
+            if change.get("type") == "position" and not change.get("dragging", True):
+                node_id = change.get("id", "")
+                position = change.get("position")
+                if node_id and position:
+                    for i, node in enumerate(self.flow_nodes):
+                        if node.get("id") == node_id:
+                            updated = node.copy()
+                            updated["position"] = position
+                            self.flow_nodes[i] = updated
+                            break
+
     @rx.var
     def has_previous_process(self) -> bool:
         return len(self.prev_flow_nodes) > 0
@@ -289,6 +310,22 @@ class ProcessState(rx.State):
     def cancel_edit_label(self):
         self.editing_node_id = ""
         self.edit_node_label = ""
+
+    def change_node_color(self, color: str):
+        """Change the color of the selected node."""
+        if not self.selected_node_id:
+            return
+        self._save_undo_snapshot()
+        for i, node in enumerate(self.flow_nodes):
+            if node.get("id") == self.selected_node_id:
+                updated = node.copy()
+                data = updated.get("data", {}).copy()
+                data["color"] = color
+                updated["data"] = data
+                self.flow_nodes[i] = updated
+                self.selected_node_data = data
+                break
+        self.process_version += 1
 
     def connect_nodes(self, source_id: str, target_id: str):
         """Add an edge between two nodes."""

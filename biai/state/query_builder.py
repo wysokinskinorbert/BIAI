@@ -5,6 +5,10 @@ import uuid
 
 import reflex as rx
 
+from biai.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
 
 class QueryBuilderState(rx.State):
     """Manages visual query builder blocks and connections."""
@@ -34,16 +38,28 @@ class QueryBuilderState(rx.State):
         {"type": "limit", "label": "Limit", "icon": "hash", "color": "#3ba272"},
     ]
 
+    # Node selection for config editing
+    selected_block_id: str = ""
+
+    def set_selected_block_id(self, value: str):
+        self.selected_block_id = value
+
     def add_block(self, block_type: str):
         """Add a new block to the canvas."""
         block_id = f"blk-{uuid.uuid4().hex[:6]}"
         max_y = max((b.get("position", {}).get("y", 0) for b in self.blocks), default=0)
+
+        colors = {
+            "table": "#5470c6", "filter": "#91cc75", "aggregate": "#fac858",
+            "join": "#ee6666", "sort": "#73c0de", "limit": "#3ba272",
+        }
 
         block = {
             "id": block_id,
             "type": block_type,
             "config": self._default_config(block_type),
             "position": {"x": 200, "y": max_y + 120},
+            "color": colors.get(block_type, "#6b7280"),
         }
         self.blocks = self.blocks + [block]
         self._regenerate_sql()
@@ -74,6 +90,62 @@ class QueryBuilderState(rx.State):
                 self.blocks[i] = updated
                 break
         self._regenerate_sql()
+
+    def update_selected_config_field(self, field: str, value: str):
+        """Update a single config field on the selected block."""
+        if not self.selected_block_id:
+            return
+        for i, b in enumerate(self.blocks):
+            if b.get("id") == self.selected_block_id:
+                updated = b.copy()
+                cfg = updated.get("config", {}).copy()
+                if field == "count":
+                    try:
+                        cfg[field] = int(value)
+                    except ValueError:
+                        cfg[field] = 100
+                else:
+                    cfg[field] = value
+                updated["config"] = cfg
+                self.blocks[i] = updated
+                break
+        self._regenerate_sql()
+
+    def set_config_table_name(self, v: str):
+        self.update_selected_config_field("table_name", v)
+
+    def set_config_alias(self, v: str):
+        self.update_selected_config_field("alias", v)
+
+    def set_config_column(self, v: str):
+        self.update_selected_config_field("column", v)
+
+    def set_config_operator(self, v: str):
+        self.update_selected_config_field("operator", v)
+
+    def set_config_value(self, v: str):
+        self.update_selected_config_field("value", v)
+
+    def set_config_function(self, v: str):
+        self.update_selected_config_field("function", v)
+
+    def set_config_group_by(self, v: str):
+        self.update_selected_config_field("group_by", v)
+
+    def set_config_join_type(self, v: str):
+        self.update_selected_config_field("join_type", v)
+
+    def set_config_on_left(self, v: str):
+        self.update_selected_config_field("on_left", v)
+
+    def set_config_on_right(self, v: str):
+        self.update_selected_config_field("on_right", v)
+
+    def set_config_direction(self, v: str):
+        self.update_selected_config_field("direction", v)
+
+    def set_config_count(self, v: str):
+        self.update_selected_config_field("count", v)
 
     def clear_all(self):
         self.blocks = []
@@ -207,6 +279,64 @@ class QueryBuilderState(rx.State):
             })
         return result
 
+    def on_node_click(self, node: dict):
+        """Select a block for config editing."""
+        self.selected_block_id = node.get("id", "")
+
+    def on_connect(self, params: dict):
+        """Handle new connection from React Flow canvas."""
+        source = params.get("source", "")
+        target = params.get("target", "")
+        if source and target:
+            self.connect_blocks(source, target)
+
+    def on_nodes_change(self, changes: list[dict]):
+        """Persist node position after drag."""
+        for change in changes:
+            if change.get("type") == "position" and not change.get("dragging", True):
+                node_id = change.get("id", "")
+                position = change.get("position")
+                if node_id and position:
+                    for i, b in enumerate(self.blocks):
+                        if b.get("id") == node_id:
+                            updated = b.copy()
+                            updated["position"] = position
+                            self.blocks[i] = updated
+                            break
+
+    @rx.var
+    def flow_nodes(self) -> list[dict[str, Any]]:
+        """Convert blocks to React Flow nodes."""
+        nodes = []
+        for b in self.blocks:
+            node_type = b.get("type", "table") + "Block"
+            nodes.append({
+                "id": b.get("id", ""),
+                "type": node_type,
+                "position": b.get("position", {"x": 200, "y": 0}),
+                "data": {
+                    "label": b.get("type", "").capitalize(),
+                    "config": b.get("config", {}),
+                    "color": b.get("color", "#6b7280"),
+                },
+            })
+        return nodes
+
+    @rx.var
+    def flow_edges(self) -> list[dict[str, Any]]:
+        """Convert connections to React Flow edges."""
+        edges = []
+        for c in self.connections:
+            edges.append({
+                "id": c.get("id", ""),
+                "source": c.get("source", ""),
+                "target": c.get("target", ""),
+                "type": "smoothstep",
+                "animated": True,
+                "style": {"stroke": "#6b7280", "strokeWidth": 2},
+            })
+        return edges
+
     @rx.var
     def has_blocks(self) -> bool:
         return len(self.blocks) > 0
@@ -214,3 +344,102 @@ class QueryBuilderState(rx.State):
     @rx.var
     def has_sql(self) -> bool:
         return self.generated_sql != "" and not self.generated_sql.startswith("--")
+
+    @rx.var
+    def selected_block_config(self) -> dict:
+        """Get config of selected block for editing."""
+        for b in self.blocks:
+            if b.get("id") == self.selected_block_id:
+                cfg = b.get("config", {})
+                return {
+                    "block_type": str(b.get("type", "")),
+                    "table_name": str(cfg.get("table_name", "")),
+                    "alias": str(cfg.get("alias", "")),
+                    "column": str(cfg.get("column", "")),
+                    "operator": str(cfg.get("operator", "=")),
+                    "value": str(cfg.get("value", "")),
+                    "function": str(cfg.get("function", "COUNT")),
+                    "group_by": str(cfg.get("group_by", "")),
+                    "join_type": str(cfg.get("join_type", "INNER")),
+                    "on_left": str(cfg.get("on_left", "")),
+                    "on_right": str(cfg.get("on_right", "")),
+                    "direction": str(cfg.get("direction", "ASC")),
+                    "count": str(cfg.get("count", "100")),
+                }
+        return {"block_type": ""}
+
+    @rx.var
+    def has_selected_block(self) -> bool:
+        return self.selected_block_id != ""
+
+    @rx.var
+    def has_preview(self) -> bool:
+        return len(self.preview_columns) > 0
+
+    @rx.var
+    def preview_row_count(self) -> int:
+        return len(self.preview_rows)
+
+    def send_to_chat(self):
+        """Copy generated SQL to chat input."""
+        # Will be handled by cross-state in the future
+        pass
+
+    @rx.event(background=True)
+    async def run_preview(self):
+        """Execute generated SQL and show preview results."""
+        sql = ""
+        async with self:
+            sql = self.generated_sql
+            if not sql or sql.startswith("--"):
+                self.preview_error = "No valid SQL to execute"
+                return
+            self.is_previewing = True
+            self.preview_error = ""
+            self.preview_rows = []
+            self.preview_columns = []
+
+        try:
+            from biai.state.database import DBState
+            from biai.db.query_executor import QueryExecutor
+            from biai.models.query import QueryResult
+
+            # Get DB connector via cross-state
+            async with self:
+                db_state = await self.get_state(DBState)
+
+            connector = None
+            async with db_state:
+                connector = await db_state.get_connector()
+
+            if connector is None:
+                async with self:
+                    self.preview_error = "Not connected to database"
+                    self.is_previewing = False
+                return
+
+            # Execute with 30 row limit for preview
+            executor = QueryExecutor(connector, timeout=15, row_limit=30)
+            result = await executor.execute(sql)
+
+            async with self:
+                if isinstance(result, QueryResult):
+                    self.preview_columns = result.columns
+                    # Convert values to strings for serialization safety
+                    self.preview_rows = [
+                        [str(v) if v is not None else "" for v in row]
+                        for row in result.rows
+                    ]
+                    self.preview_error = ""
+                else:
+                    self.preview_error = result.error_message
+                    self.preview_columns = []
+                    self.preview_rows = []
+
+        except Exception as e:
+            logger.error("preview_error", error=str(e))
+            async with self:
+                self.preview_error = str(e)
+        finally:
+            async with self:
+                self.is_previewing = False

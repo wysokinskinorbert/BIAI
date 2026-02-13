@@ -55,14 +55,24 @@ def process_flow_card() -> rx.Component:
                     content="Compare with previous process",
                 ),
             ),
-            rx.tooltip(
-                rx.icon_button(
-                    rx.icon("download", size=14),
-                    variant="ghost",
-                    size="1",
-                    on_click=rx.call_script("window.exportFlowToPng()"),
+            rx.menu.root(
+                rx.menu.trigger(
+                    rx.icon_button(
+                        rx.icon("download", size=14),
+                        variant="ghost",
+                        size="1",
+                    ),
                 ),
-                content="Export as PNG",
+                rx.menu.content(
+                    rx.menu.item(
+                        "Export PNG",
+                        on_click=rx.call_script("window.exportFlowToPng()"),
+                    ),
+                    rx.menu.item(
+                        "Export SVG",
+                        on_click=rx.call_script("window.exportFlowToSvg()"),
+                    ),
+                ),
             ),
             rx.tooltip(
                 rx.icon_button(
@@ -116,6 +126,8 @@ def process_flow_card() -> rx.Component:
                     nodes_connectable=ProcessState.is_edit_mode,
                     elements_selectable=ProcessState.is_edit_mode,
                     on_node_click=ProcessState.on_node_click,
+                    on_node_double_click=ProcessState.on_node_double_click,
+                    on_nodes_change=ProcessState.on_nodes_change,
                     on_connect=ProcessState.on_connect,
                 ),
             ),
@@ -245,6 +257,40 @@ def process_flow_card() -> rx.Component:
                             size="1",
                             color_scheme="red",
                             on_click=ProcessState.delete_selected_node,
+                        ),
+                        # Color picker
+                        rx.popover.root(
+                            rx.popover.trigger(
+                                rx.button(
+                                    rx.icon("palette", size=12),
+                                    "Color",
+                                    variant="outline",
+                                    size="1",
+                                ),
+                            ),
+                            rx.popover.content(
+                                rx.hstack(
+                                    *[
+                                        rx.box(
+                                            width="24px",
+                                            height="24px",
+                                            border_radius="4px",
+                                            bg=c,
+                                            cursor="pointer",
+                                            border="2px solid transparent",
+                                            _hover={"border_color": "white"},
+                                            on_click=ProcessState.change_node_color(c),
+                                        )
+                                        for c in [
+                                            "#6b7280", "#22c55e", "#3b82f6", "#a855f7",
+                                            "#ef4444", "#f59e0b", "#06b6d4", "#ec4899",
+                                        ]
+                                    ],
+                                    spacing="1",
+                                    flex_wrap="wrap",
+                                ),
+                                side="top",
+                            ),
                         ),
                     ),
                 ),
