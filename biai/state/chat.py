@@ -148,8 +148,70 @@ class ChatState(rx.State):
         self.confirm_clear = False
 
     def toggle_story_mode(self):
-        """Toggle between normal description and data storytelling mode."""
+        """Toggle story mode and trigger retroactive generation if data exists."""
         self.story_mode = not self.story_mode
+        if self.story_mode:
+            # Trigger background story generation for existing data
+            return ChatState.generate_story_retroactive
+
+    @rx.event(background=True)
+    async def generate_story_retroactive(self):
+        """Generate story from existing query data when story mode is toggled ON."""
+        # Get last question from conversation context or messages
+        question = ""
+        async with self:
+            if self.conversation_context:
+                question = self.conversation_context[-1].get("question", "")
+            elif self.messages:
+                for msg in reversed(self.messages):
+                    if msg.get("role") == "user":
+                        question = msg.get("content", "")
+                        break
+
+        if not question:
+            return
+
+        # Reconstruct DataFrame from QueryState
+        import pandas as pd
+        columns = []
+        rows = []
+        async with self:
+            query_state = await self.get_state(QueryState)
+        async with query_state:
+            columns = list(query_state.columns)
+            rows = [list(r) for r in query_state.rows]
+
+        if not columns or not rows:
+            return
+
+        df = pd.DataFrame(rows, columns=columns)
+        # Coerce numeric columns
+        for col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="ignore")
+
+        try:
+            from biai.ai.storyteller import DataStoryteller
+            from biai.config.settings import get_settings
+            settings = get_settings()
+            storyteller = DataStoryteller(
+                ollama_host=settings.ollama_host,
+                ollama_model=settings.ollama_model,
+            )
+            # Get insights if available
+            insight_objs = None
+            async with self:
+                insight_dicts = self.insights
+            if insight_dicts:
+                from biai.models.insight import Insight
+                insight_objs = [Insight(**d) for d in insight_dicts]
+
+            story = await storyteller.generate_story(
+                question=question, df=df, insights=insight_objs,
+            )
+            async with self:
+                self.story_data = story.model_dump()
+        except Exception:
+            pass
 
     def clear_chat(self):
         """Confirmed: clear messages and context."""

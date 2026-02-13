@@ -750,16 +750,18 @@ def _build_parallel(config: ChartConfig, df: pd.DataFrame) -> dict:
 
 
 def add_chart_annotations(option: dict, df: pd.DataFrame, insights: list[dict] | None = None) -> dict:
-    """Add markPoint/markLine annotations to an existing ECharts option.
+    """Add markPoint/markLine/markArea annotations to an existing ECharts option.
 
     Enhances charts with:
     - markPoint for min/max values
-    - markLine for average
+    - markLine for average + trend line (linear regression for line/area)
     - markArea for anomaly regions (if insights provided)
+    - Percentage change label between first and last values (for line/area)
     """
     if not option or "series" not in option:
         return option
 
+    is_first_series = True
     for series in option.get("series", []):
         stype = series.get("type", "")
         if stype not in ("bar", "line", "area"):
@@ -774,27 +776,152 @@ def add_chart_annotations(option: dict, df: pd.DataFrame, insights: list[dict] |
         series["markPoint"]["symbolSize"] = 40
         series["markPoint"]["label"] = {"color": "#fff", "fontSize": 10}
 
-        # Add average line
-        series.setdefault("markLine", {})
-        series["markLine"]["data"] = [
+        # Build markLine data — always include average
+        mark_line_data: list = [
             {"type": "average", "name": "Avg", "lineStyle": {"color": "#fac858", "type": "dashed"}},
         ]
+
+        # Add trend line for line/area charts with enough data points
+        if stype in ("line", "area") and is_first_series:
+            trend = _compute_trend_line(series, df)
+            if trend:
+                mark_line_data.append(trend)
+
+        series.setdefault("markLine", {})
+        series["markLine"]["data"] = mark_line_data
         series["markLine"]["label"] = {"color": "#fac858", "fontSize": 10}
+        series["markLine"]["silent"] = True
+
+        # Add percentage change label for first line/area series
+        if stype in ("line", "area") and is_first_series:
+            pct = _compute_percentage_change(series)
+            if pct is not None:
+                existing = series["markPoint"]["data"]
+                color = "#91cc75" if pct >= 0 else "#ee6666"
+                sign = "+" if pct >= 0 else ""
+                existing.append({
+                    "coord": _last_data_coord(series),
+                    "value": f"{sign}{pct:.1f}%",
+                    "symbol": "pin",
+                    "symbolSize": 36,
+                    "itemStyle": {"color": color},
+                    "label": {"color": "#fff", "fontSize": 9},
+                })
+
+        is_first_series = False
 
     # Add anomaly markArea from insights if available
-    if insights:
+    if insights and option.get("series"):
+        x_axis_data = _get_x_axis_labels(option)
         for insight in insights:
-            if insight.get("type") == "anomaly" and option.get("series"):
-                first_series = option["series"][0]
-                if first_series.get("type") in ("bar", "line", "area"):
-                    first_series.setdefault("markArea", {})
-                    first_series["markArea"].setdefault("data", [])
-                    # Visual indicator — subtle red background area
-                    first_series["markArea"]["itemStyle"] = {
-                        "color": "rgba(238, 102, 102, 0.08)",
-                    }
+            if insight.get("type") != "anomaly":
+                continue
+            first_series = option["series"][0]
+            if first_series.get("type") not in ("bar", "line", "area"):
+                continue
+            first_series.setdefault("markArea", {})
+            first_series["markArea"].setdefault("data", [])
+            first_series["markArea"]["silent"] = True
+            first_series["markArea"]["itemStyle"] = {
+                "color": "rgba(238, 102, 102, 0.10)",
+            }
+            # Place markArea at anomaly position if metadata has index
+            meta = insight.get("metadata", {})
+            idx = meta.get("index") or meta.get("position")
+            if idx is not None and x_axis_data:
+                try:
+                    pos = int(idx)
+                    if 0 <= pos < len(x_axis_data):
+                        label = x_axis_data[pos]
+                        first_series["markArea"]["data"].append([
+                            {"xAxis": label, "itemStyle": {"color": "rgba(238, 102, 102, 0.15)"}},
+                            {"xAxis": label},
+                        ])
+                except (ValueError, TypeError):
+                    pass
 
     return option
+
+
+def _compute_trend_line(series: dict, df: pd.DataFrame) -> dict | None:
+    """Compute linear regression trend line as markLine start/end coords."""
+    data = series.get("data", [])
+    if not data or len(data) < 3:
+        return None
+    try:
+        import numpy as np
+        # Extract y-values (handle both plain values and [x,y] pairs)
+        y_vals = []
+        for d in data:
+            if isinstance(d, (int, float)):
+                y_vals.append(float(d))
+            elif isinstance(d, (list, tuple)) and len(d) >= 2:
+                y_vals.append(float(d[1]))
+            else:
+                return None
+        if len(y_vals) < 3:
+            return None
+        x = np.arange(len(y_vals), dtype=float)
+        y = np.array(y_vals, dtype=float)
+        # Simple linear regression
+        slope, intercept = np.polyfit(x, y, 1)
+        return [
+            {"coord": [0, round(float(intercept), 2)], "symbol": "none"},
+            {
+                "coord": [len(y_vals) - 1, round(float(slope * (len(y_vals) - 1) + intercept), 2)],
+                "symbol": "none",
+                "lineStyle": {"color": "#73c0de", "type": "dotted", "width": 2},
+                "label": {"formatter": "Trend", "color": "#73c0de"},
+            },
+        ]
+    except Exception:
+        return None
+
+
+def _compute_percentage_change(series: dict) -> float | None:
+    """Compute percentage change between first and last data values."""
+    data = series.get("data", [])
+    if not data or len(data) < 2:
+        return None
+    try:
+        def _val(d):
+            if isinstance(d, (int, float)):
+                return float(d)
+            if isinstance(d, (list, tuple)) and len(d) >= 2:
+                return float(d[1])
+            return None
+
+        first = _val(data[0])
+        last = _val(data[-1])
+        if first is None or last is None or first == 0:
+            return None
+        return ((last - first) / abs(first)) * 100
+    except Exception:
+        return None
+
+
+def _last_data_coord(series: dict) -> list:
+    """Get coordinate of the last data point for markPoint placement."""
+    data = series.get("data", [])
+    if not data:
+        return [0, 0]
+    idx = len(data) - 1
+    d = data[-1]
+    if isinstance(d, (int, float)):
+        return [idx, float(d)]
+    if isinstance(d, (list, tuple)) and len(d) >= 2:
+        return [d[0], float(d[1])]
+    return [idx, 0]
+
+
+def _get_x_axis_labels(option: dict) -> list[str]:
+    """Extract x-axis category labels from ECharts option."""
+    x_axis = option.get("xAxis")
+    if isinstance(x_axis, dict):
+        return x_axis.get("data", [])
+    if isinstance(x_axis, list) and x_axis:
+        return x_axis[0].get("data", [])
+    return []
 
 
 def _build_pie(config: ChartConfig, df: pd.DataFrame) -> dict:
