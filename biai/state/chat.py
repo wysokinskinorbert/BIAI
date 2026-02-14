@@ -500,6 +500,12 @@ class ChatState(rx.State):
                         insight_dicts = [i.model_dump(mode="json") for i in insights]
                         async with self:
                             self.insights = insight_dicts
+                            # Store insights per-message
+                            if insight_dicts:
+                                self._update_last_message(
+                                    insights=insight_dicts,
+                                    has_insights=True,
+                                )
                         # Update chart annotations with insight data
                         if insight_dicts:
                             async with chart_state:

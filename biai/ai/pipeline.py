@@ -462,9 +462,8 @@ def _extract_key_points(df: pd.DataFrame, max_points: int = 5) -> str:
     for col in num_cols[:3]:
         points.append(f"- {col}: min={df[col].min()}, max={df[col].max()}, avg={df[col].mean():.2f}")
 
-    if len(df) <= max_points:
-        points.append(f"- All {len(df)} rows returned")
-    else:
-        points.append(f"- Top value: {df.iloc[0].to_dict()}")
+    # Include actual data rows to prevent LLM hallucination
+    preview = df.head(max_points).to_string(index=False)
+    points.append(f"\nActual data (first {min(len(df), max_points)} rows):\n{preview}")
 
     return "\n".join(points[:max_points])

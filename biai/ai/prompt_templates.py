@@ -74,6 +74,7 @@ DESCRIPTION_PROMPT = """Based on the query results, provide a brief, insightful 
 
 Write 2-3 sentences highlighting the key findings. Be specific with numbers. Use business-friendly language.
 Do not use LaTeX, mathematical notation, or dollar signs for formatting. Use plain text only.
+IMPORTANT: Only reference values and names that appear in the actual data above. Do NOT invent, estimate, or hallucinate any values.
 """
 
 

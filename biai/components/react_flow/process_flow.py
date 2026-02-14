@@ -116,6 +116,7 @@ def process_flow_card() -> rx.Component:
                     react_flow_minimap(
                         node_stroke_color=rx.color_mode_cond("#999", "#555"),
                         node_color=rx.color_mode_cond("#ccc", "#333"),
+                        style={"bottom": 35, "right": 10, "width": 120, "height": 80},
                     ),
                     nodes=ProcessState.flow_nodes,
                     edges=ProcessState.flow_edges,

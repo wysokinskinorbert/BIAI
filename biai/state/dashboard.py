@@ -323,11 +323,12 @@ class DashboardState(rx.State):
         from biai.state.chart import ChartState
         chart = await self.get_state(ChartState)
         if not chart.show_echarts:
-            return
+            return rx.toast.error("No chart to add")
         self.add_chart_widget(
             title=chart.chart_title or "Chart",
             echarts_option=chart.echarts_option,
         )
+        return rx.toast.success(f"Widget '{chart.chart_title or 'Chart'}' added to Dashboard Builder")
 
     # --- Persistence ---
 

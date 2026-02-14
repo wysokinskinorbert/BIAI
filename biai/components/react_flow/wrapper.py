@@ -71,6 +71,7 @@ class MiniMap(ReactFlowLib):
     tag = "MiniMap"
     node_stroke_color: rx.Var[str] = "#555"  # type: ignore
     node_color: rx.Var[str] = "#333"  # type: ignore
+    style: rx.Var[dict[str, Any]] = {}  # type: ignore
 
 
 class ReactFlowProvider(rx.NoSSRComponent):

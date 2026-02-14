@@ -761,20 +761,26 @@ def add_chart_annotations(option: dict, df: pd.DataFrame, insights: list[dict] |
     if not option or "series" not in option:
         return option
 
+    # Ensure enough grid space for markLine/markPoint labels
+    grid = option.setdefault("grid", {})
+    if grid.get("right") in (None, "10%"):
+        grid["right"] = "15%"
+
     is_first_series = True
     for series in option.get("series", []):
         stype = series.get("type", "")
         if stype not in ("bar", "line", "area"):
             continue
 
-        # Add min/max points
+        # Add min/max points (offset above bars to avoid overlapping data labels)
         series.setdefault("markPoint", {})
         series["markPoint"]["data"] = [
             {"type": "max", "name": "Max", "itemStyle": {"color": "#91cc75"}},
             {"type": "min", "name": "Min", "itemStyle": {"color": "#ee6666"}},
         ]
-        series["markPoint"]["symbolSize"] = 40
-        series["markPoint"]["label"] = {"color": "#fff", "fontSize": 10}
+        series["markPoint"]["symbolSize"] = 35
+        series["markPoint"]["label"] = {"color": "#fff", "fontSize": 9}
+        series["markPoint"]["symbolOffset"] = [0, -10]
 
         # Build markLine data — always include average
         mark_line_data: list = [
@@ -789,7 +795,11 @@ def add_chart_annotations(option: dict, df: pd.DataFrame, insights: list[dict] |
 
         series.setdefault("markLine", {})
         series["markLine"]["data"] = mark_line_data
-        series["markLine"]["label"] = {"color": "#fac858", "fontSize": 10}
+        series["markLine"]["label"] = {
+            "color": "#fac858",
+            "fontSize": 10,
+            "position": "insideEndTop",
+        }
         series["markLine"]["silent"] = True
 
         # Add percentage change label for first line/area series

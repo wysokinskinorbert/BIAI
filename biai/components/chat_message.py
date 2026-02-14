@@ -110,9 +110,9 @@ def chat_message(message: dict) -> rx.Component:
                     ),
                 ),
 
-                # Insights section (shown under last message)
+                # Insights section (per-message insights)
                 rx.cond(
-                    (message["has_table"]) & (~message["is_streaming"]) & (ChatState.insights.length() > 0),
+                    message["has_insights"],
                     rx.vstack(
                         rx.separator(),
                         rx.hstack(
@@ -122,7 +122,7 @@ def chat_message(message: dict) -> rx.Component:
                             align="center",
                         ),
                         rx.foreach(
-                            ChatState.insights,
+                            message["insights"].to(list[dict[str, str]]),
                             _insight_item,
                         ),
                         width="100%",

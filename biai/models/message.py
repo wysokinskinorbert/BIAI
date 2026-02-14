@@ -20,3 +20,5 @@ class ChatMessage(BaseModel):
     is_streaming: bool = False
     is_multi_step: bool = False
     question: str = ""  # original user question (for save/bookmark feature)
+    insights: list = []  # per-message insights [{type, title, description, severity}]
+    has_insights: bool = False
