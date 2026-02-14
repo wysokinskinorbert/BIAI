@@ -196,9 +196,9 @@ class AIPipeline:
             schema_snapshot = None
 
         plan = await self._planner.plan(
-            question=effective_question,
+            question=question,
             schema=schema_snapshot,
-            context=context,
+            context=None,  # Don't leak conversation context into multi-step planner
         )
 
         if plan.is_complex and len(plan.steps) > 1:
@@ -341,11 +341,19 @@ class AIPipeline:
         if result.df is None or result.df.empty:
             return
 
-        # Chart recommendation
+        # Type coercion: force numeric columns (Decimal/object → numeric)
+        for col in result.df.select_dtypes(include=["object"]).columns:
+            result.df[col] = pd.to_numeric(result.df[col], errors="ignore")
+
+        # Chart recommendation (wrapped for type safety)
         sql = result.sql_query.sql if result.sql_query else ""
-        result.chart_config = self._chart_advisor.recommend(
-            question=question, sql=sql, df=result.df,
-        )
+        try:
+            result.chart_config = self._chart_advisor.recommend(
+                question=question, sql=sql, df=result.df,
+            )
+        except Exception as e:
+            logger.warning("chart_recommendation_failed", error=str(e))
+            result.chart_config = None
 
         # Process detection
         from biai.ai.process_detector import ProcessDetector
@@ -460,7 +468,10 @@ def _extract_key_points(df: pd.DataFrame, max_points: int = 5) -> str:
     num_cols = df.select_dtypes(include=["number"]).columns
 
     for col in num_cols[:3]:
-        points.append(f"- {col}: min={df[col].min()}, max={df[col].max()}, avg={df[col].mean():.2f}")
+        try:
+            points.append(f"- {col}: min={df[col].min()}, max={df[col].max()}, avg={df[col].mean():.2f}")
+        except (TypeError, ValueError):
+            points.append(f"- {col}: {df[col].nunique()} unique values")
 
     # Include actual data rows to prevent LLM hallucination
     preview = df.head(max_points).to_string(index=False)

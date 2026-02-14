@@ -221,6 +221,7 @@ class ChatState(rx.State):
         self.analysis_steps = []
         self.is_multi_step = False
         self.confirm_clear = False
+        self.suggested_queries = []
         self.story_data = {
             "context": "",
             "key_findings": [],
@@ -258,6 +259,7 @@ class ChatState(rx.State):
             self.analysis_steps = []
             self.is_multi_step = False
             self.insights = []
+            self.suggested_queries = []
 
             # Add placeholder AI message
             self.messages.append(
@@ -333,17 +335,22 @@ class ChatState(rx.State):
                 async with self:
                     self.analysis_steps = steps
                     self.is_multi_step = True
+                    self._update_last_message(analysis_steps=steps, is_multi_step=True)
 
             # Process question (with context)
             result = await pipeline.process(
                 question, context=context, on_step_update=_on_step_update,
             )
 
-            # Store multi-step state from result
+            # Store multi-step state from result (per-message)
             if result.is_multi_step:
                 async with self:
                     self.analysis_steps = result.analysis_steps
                     self.is_multi_step = True
+                    self._update_last_message(
+                        analysis_steps=result.analysis_steps,
+                        is_multi_step=True,
+                    )
 
             if result.success and result.query_result:
                 # get_state must be called inside async with self
@@ -551,6 +558,7 @@ class ChatState(rx.State):
                         is_error=True,
                         is_streaming=False,
                     )
+                    self.suggested_queries = []
 
         except Exception as e:
             async with self:
@@ -559,6 +567,7 @@ class ChatState(rx.State):
                     is_error=True,
                     is_streaming=False,
                 )
+                self.suggested_queries = []
 
         finally:
             async with self:

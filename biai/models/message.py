@@ -22,3 +22,4 @@ class ChatMessage(BaseModel):
     question: str = ""  # original user question (for save/bookmark feature)
     insights: list = []  # per-message insights [{type, title, description, severity}]
     has_insights: bool = False
+    analysis_steps: list = []  # per-message [{step, description, status, result_summary, sql}]

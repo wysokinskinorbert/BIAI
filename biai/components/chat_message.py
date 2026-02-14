@@ -48,10 +48,10 @@ def chat_message(message: dict) -> rx.Component:
                     rx.markdown(message["content"], size="2"),
                 ),
 
-                # Multi-step analysis progress (per-message flag)
+                # Multi-step analysis progress (per-message)
                 rx.cond(
                     message["is_multi_step"],
-                    _analysis_steps_section(),
+                    _analysis_steps_section(message),
                 ),
 
                 # SQL badge
@@ -305,8 +305,8 @@ def _story_section() -> rx.Component:
     )
 
 
-def _analysis_steps_section() -> rx.Component:
-    """Render multi-step analysis progress."""
+def _analysis_steps_section(message: dict) -> rx.Component:
+    """Render multi-step analysis progress from per-message data."""
     return rx.vstack(
         rx.hstack(
             rx.icon("list-checks", size=14, color="var(--cyan-9)"),
@@ -315,7 +315,7 @@ def _analysis_steps_section() -> rx.Component:
             align="center",
         ),
         rx.foreach(
-            ChatState.analysis_steps,
+            message["analysis_steps"].to(list[dict[str, str]]),
             _analysis_step_item,
         ),
         width="100%",

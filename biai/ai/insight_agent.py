@@ -47,6 +47,12 @@ class InsightAgent:
         if df.empty or len(df) < 2:
             return insights
 
+        # Force numeric coercion on object columns (Decimal from DB)
+        for col in df.select_dtypes(include=["object"]).columns:
+            converted = pd.to_numeric(df[col], errors="coerce")
+            if converted.notna().any():
+                df[col] = converted
+
         num_cols = df.select_dtypes(include=["number"]).columns.tolist()
         cat_cols = df.select_dtypes(exclude=["number"]).columns.tolist()
 
