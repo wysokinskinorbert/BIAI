@@ -7,6 +7,7 @@ from pathlib import Path
 
 _BIAI_DIR = Path.home() / ".biai"
 _DASHBOARDS_DIR = _BIAI_DIR / "dashboards"
+_DEFAULT_FILE = _DASHBOARDS_DIR / "_default.txt"
 
 
 class DashboardStorage:
@@ -66,6 +67,25 @@ class DashboardStorage:
             path.unlink()
             return True
         return False
+
+    @staticmethod
+    def get_default() -> str:
+        """Return name of default dashboard (empty string if none)."""
+        if not _DEFAULT_FILE.exists():
+            return ""
+        try:
+            return _DEFAULT_FILE.read_text(encoding="utf-8").strip()
+        except Exception:
+            return ""
+
+    @staticmethod
+    def set_default(name: str):
+        """Set or clear the default dashboard name."""
+        _DASHBOARDS_DIR.mkdir(parents=True, exist_ok=True)
+        if name:
+            _DEFAULT_FILE.write_text(name.strip(), encoding="utf-8")
+        elif _DEFAULT_FILE.exists():
+            _DEFAULT_FILE.unlink()
 
     @staticmethod
     def generate_widget_id() -> str:

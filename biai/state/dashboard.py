@@ -95,6 +95,11 @@ class DashboardState(rx.State):
     # Template picker
     show_template_picker: bool = False
 
+    # Default dashboard (shown on main page)
+    default_dashboard_name: str = ""
+    default_widgets: list[dict[str, Any]] = []
+    default_layout: list[dict[str, Any]] = []
+
     # Widget editing
     editing_widget_id: str = ""
     edit_title: str = ""
@@ -388,3 +393,55 @@ class DashboardState(rx.State):
     @rx.var
     def widget_count(self) -> int:
         return len(self.widgets)
+
+    # --- Default Dashboard ---
+
+    @rx.var
+    def has_default_dashboard(self) -> bool:
+        return self.default_dashboard_name != "" and len(self.default_widgets) > 0
+
+    def set_as_default(self):
+        """Set current dashboard as the default (shown on main page)."""
+        import json as _json
+
+        name = self.dashboard_name
+        if not self.widgets:
+            return rx.toast.error("Dashboard is empty — nothing to set as default")
+
+        # Save first if not yet saved
+        widgets = _json.loads(_json.dumps(list(self.widgets)))
+        layout = _json.loads(_json.dumps(list(self.layout)))
+        DashboardStorage.save(name, widgets, layout)
+        DashboardStorage.set_default(name)
+
+        self.default_dashboard_name = name
+        self.default_widgets = widgets
+        self.default_layout = layout
+        self.saved_dashboards = DashboardStorage.list_dashboards()
+        return rx.toast.success(f"'{name}' set as default dashboard")
+
+    def clear_default(self):
+        """Remove the default dashboard."""
+        DashboardStorage.set_default("")
+        self.default_dashboard_name = ""
+        self.default_widgets = []
+        self.default_layout = []
+        return rx.toast.info("Default dashboard cleared")
+
+    def load_default_on_init(self):
+        """Load the default dashboard on main page init."""
+        name = DashboardStorage.get_default()
+        if not name:
+            self.default_dashboard_name = ""
+            self.default_widgets = []
+            self.default_layout = []
+            return
+        data = DashboardStorage.load(name)
+        if data and data.get("widgets"):
+            self.default_dashboard_name = data.get("name", name)
+            self.default_widgets = data.get("widgets", [])
+            self.default_layout = data.get("layout", [])
+        else:
+            self.default_dashboard_name = ""
+            self.default_widgets = []
+            self.default_layout = []

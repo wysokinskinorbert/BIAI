@@ -7,6 +7,7 @@ from biai.state.database import DBState
 from biai.components.connection_form import connection_form
 from biai.components.data_explorer import data_explorer
 from biai.components.model_selector import model_selector
+from biai.state.dashboard import DashboardState
 from biai.pages.settings import SettingsState
 
 
@@ -50,7 +51,11 @@ def sidebar() -> rx.Component:
                     rx.button(
                         rx.icon("layout-dashboard", size=14),
                         "Dashboard Builder",
-                        variant="ghost",
+                        rx.cond(
+                            DashboardState.has_default_dashboard,
+                            rx.badge("Default", size="1", variant="surface"),
+                        ),
+                        variant="surface",
                         size="1",
                         width="100%",
                     ),

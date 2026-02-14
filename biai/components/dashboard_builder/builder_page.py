@@ -120,6 +120,20 @@ def _toolbar() -> rx.Component:
             size="1",
             on_click=DashboardState.set_show_save_dialog(True),
         ),
+        # Set as Default (only when dashboard has widgets)
+        rx.cond(
+            DashboardState.has_widgets,
+            rx.tooltip(
+                rx.button(
+                    rx.icon("home", size=14),
+                    "Set Default",
+                    variant="outline",
+                    size="1",
+                    on_click=DashboardState.set_as_default,
+                ),
+                content="Show this dashboard on the main page",
+            ),
+        ),
         # Load saved
         rx.menu.root(
             rx.menu.trigger(

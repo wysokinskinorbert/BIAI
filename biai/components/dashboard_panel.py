@@ -89,6 +89,19 @@ def dashboard_panel() -> rx.Component:
                     content="Export data as CSV",
                 ),
             ),
+            # Link to Dashboard Builder (always visible)
+            rx.tooltip(
+                rx.link(
+                    rx.icon_button(
+                        rx.icon("external-link", size=14),
+                        variant="outline",
+                        size="1",
+                        aria_label="Open Dashboard Builder",
+                    ),
+                    href="/dashboard",
+                ),
+                content="Open Dashboard Builder",
+            ),
             width="100%",
             align="center",
             padding="12px 16px",
@@ -190,19 +203,23 @@ def dashboard_panel() -> rx.Component:
                     padding="16px",
                 ),
 
-                # No data: loading skeleton, ERD, or empty state
+                # No data: loading skeleton, default dashboard, ERD, or empty state
                 rx.cond(
                     ChatState.is_processing,
                     _loading_skeleton(),
                     rx.cond(
-                        SchemaState.has_erd,
-                        rx.vstack(
-                            erd_card(),
-                            width="100%",
-                            spacing="4",
-                            padding="16px",
+                        DashboardState.has_default_dashboard,
+                        _default_dashboard_view(),
+                        rx.cond(
+                            SchemaState.has_erd,
+                            rx.vstack(
+                                erd_card(),
+                                width="100%",
+                                spacing="4",
+                                padding="16px",
+                            ),
+                            _empty_dashboard(),
                         ),
-                        _empty_dashboard(),
                     ),
                 ),
             ),
@@ -311,6 +328,149 @@ def _loading_skeleton() -> rx.Component:
         width="100%",
         spacing="4",
         padding="16px",
+    )
+
+
+def _default_dashboard_view() -> rx.Component:
+    """Render the default dashboard in read-only mode."""
+    return rx.vstack(
+        # Header: dashboard name + link to builder
+        rx.hstack(
+            rx.icon("layout-dashboard", size=16, color="var(--accent-9)"),
+            rx.text(
+                DashboardState.default_dashboard_name,
+                size="2",
+                weight="medium",
+            ),
+            rx.spacer(),
+            rx.link(
+                rx.button(
+                    rx.icon("pencil", size=12),
+                    "Edit in Builder",
+                    variant="outline",
+                    size="1",
+                ),
+                href="/dashboard",
+            ),
+            width="100%",
+            align="center",
+            padding_bottom="8px",
+            border_bottom="1px solid var(--gray-a4)",
+        ),
+        # Widget grid
+        rx.box(
+            rx.foreach(
+                DashboardState.default_widgets,
+                _default_widget_card,
+            ),
+            width="100%",
+            display="grid",
+            grid_template_columns="repeat(auto-fit, minmax(250px, 1fr))",
+            gap="12px",
+        ),
+        width="100%",
+        spacing="3",
+        padding="16px",
+    )
+
+
+def _default_widget_card(widget: rx.Var[dict]) -> rx.Component:
+    """Render a single widget card in read-only mode for the default dashboard."""
+    wtype = widget["widget_type"]
+    return rx.card(
+        rx.vstack(
+            # Widget title
+            rx.text(widget["title"], size="2", weight="medium", truncate=True),
+            # KPI widget
+            rx.cond(
+                wtype == "kpi",
+                rx.vstack(
+                    rx.text(
+                        widget["kpi_value"],
+                        size="6",
+                        weight="bold",
+                        color="var(--accent-9)",
+                        trim="both",
+                    ),
+                    rx.text(
+                        widget["kpi_label"],
+                        size="1",
+                        color="var(--gray-9)",
+                    ),
+                    align="center",
+                    spacing="1",
+                ),
+            ),
+            # Chart widget
+            rx.cond(
+                wtype == "chart",
+                rx.cond(
+                    widget["echarts_option"].to(bool),
+                    rx.box(
+                        echarts_component(
+                            option=widget["echarts_option"],
+                            not_merge=True,
+                        ),
+                        width="100%",
+                        height="200px",
+                    ),
+                    rx.center(
+                        rx.text("No chart data", size="1", color="var(--gray-9)"),
+                        height="80px",
+                        width="100%",
+                    ),
+                ),
+            ),
+            # Insight widget
+            rx.cond(
+                wtype == "insight",
+                rx.vstack(
+                    rx.hstack(
+                        rx.icon("lightbulb", size=14, color="var(--amber-9)"),
+                        rx.text(
+                            widget["insight_title"],
+                            size="2",
+                            weight="medium",
+                        ),
+                        spacing="2",
+                        align="center",
+                    ),
+                    rx.text(
+                        widget["insight_description"],
+                        size="1",
+                        color="var(--gray-11)",
+                    ),
+                    spacing="1",
+                    width="100%",
+                ),
+            ),
+            # Text widget
+            rx.cond(
+                wtype == "text",
+                rx.box(
+                    rx.markdown(widget["content"], size="1"),
+                    width="100%",
+                ),
+            ),
+            # Table widget (placeholder)
+            rx.cond(
+                wtype == "table",
+                rx.center(
+                    rx.hstack(
+                        rx.icon("table-2", size=14, color="var(--gray-8)"),
+                        rx.text("Data Table", size="1", color="var(--gray-9)"),
+                        spacing="2",
+                        align="center",
+                    ),
+                    height="60px",
+                    width="100%",
+                ),
+            ),
+            width="100%",
+            spacing="2",
+        ),
+        size="2",
+        width="100%",
     )
 
 
