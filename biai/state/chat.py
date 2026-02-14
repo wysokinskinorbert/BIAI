@@ -187,7 +187,9 @@ class ChatState(rx.State):
         df = pd.DataFrame(rows, columns=columns)
         # Coerce numeric columns
         for col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="ignore")
+            converted = pd.to_numeric(df[col], errors="coerce")
+            if converted.notna().any():
+                df[col] = converted
 
         try:
             from biai.ai.storyteller import DataStoryteller

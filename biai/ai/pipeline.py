@@ -343,7 +343,9 @@ class AIPipeline:
 
         # Type coercion: force numeric columns (Decimal/object → numeric)
         for col in result.df.select_dtypes(include=["object"]).columns:
-            result.df[col] = pd.to_numeric(result.df[col], errors="ignore")
+            converted = pd.to_numeric(result.df[col], errors="coerce")
+            if converted.notna().any():
+                result.df[col] = converted
 
         # Chart recommendation (wrapped for type safety)
         sql = result.sql_query.sql if result.sql_query else ""
