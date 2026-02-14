@@ -67,11 +67,13 @@ class AIPipeline:
         ollama_host: str = DEFAULT_OLLAMA_HOST,
         chroma_host: str | None = None,
         chroma_collection: str = DEFAULT_CHROMA_COLLECTION,
+        schema_name: str = "",
     ):
         self._connector = connector
         self._db_type = db_type
         self._ollama_host = ollama_host
         self._ollama_model = ollama_model
+        self._schema_name = schema_name
 
         # Set dialect
         dialect = DialectHelper.get_sqlglot_dialect(db_type)
@@ -126,7 +128,7 @@ class AIPipeline:
         """Train Vanna with current database schema."""
         # Reset collections to avoid corrupted HNSW indices from previous sessions
         self._vanna.reset_collections()
-        snapshot = await self._schema_manager.get_snapshot()
+        snapshot = await self._schema_manager.get_snapshot(schema=self._schema_name)
         # Generate docs and examples from actual schema (real column names)
         docs = DialectHelper.get_documentation(snapshot)
         examples = DialectHelper.get_examples(self._db_type, schema=snapshot)
@@ -231,7 +233,7 @@ class AIPipeline:
 
         # Check if multi-step analysis is needed
         try:
-            schema_snapshot = await self._schema_manager.get_snapshot()
+            schema_snapshot = await self._schema_manager.get_snapshot(schema=self._schema_name)
         except Exception:
             schema_snapshot = None
 
@@ -405,35 +407,39 @@ class AIPipeline:
         if not PROCESS_DETECTION_ENABLED:
             return
 
-        detector = ProcessDetector()
-        if not detector.detect_in_dataframe(result.df, question):
-            return
+        try:
+            detector = ProcessDetector()
+            if not detector.detect_in_dataframe(result.df, question):
+                return
 
-        builder = ProcessGraphBuilder()
-        discovered_procs = self._discovered_processes
-        if not discovered_procs and USE_DYNAMIC_DISCOVERY:
-            cached = _discovery_cache.get(self._connector.config)
-            if cached:
-                discovered_procs = cached
-                self._discovered_processes = cached
-        if discovered_procs:
-            process_type, discovered = detector.detect_process_type_dynamic(
-                result.df, sql, discovered_procs,
+            builder = ProcessGraphBuilder()
+            discovered_procs = self._discovered_processes
+            if not discovered_procs and USE_DYNAMIC_DISCOVERY:
+                cached = _discovery_cache.get(self._connector.config)
+                if cached:
+                    discovered_procs = cached
+                    self._discovered_processes = cached
+            if discovered_procs:
+                process_type, discovered = detector.detect_process_type_dynamic(
+                    result.df, sql, discovered_procs,
+                )
+            else:
+                process_type = detector.detect_process_type(result.df, sql)
+                discovered = None
+            result.process_config = builder.build(
+                result.df, process_type, question, discovered=discovered,
             )
-        else:
-            process_type = detector.detect_process_type(result.df, sql)
-            discovered = None
-        result.process_config = builder.build(
-            result.df, process_type, question, discovered=discovered,
-        )
-        if result.process_config:
-            logger.info(
-                "process_detected",
-                process_type=process_type,
-                nodes=len(result.process_config.nodes),
-                edges=len(result.process_config.edges),
-                dynamic=discovered is not None,
-            )
+            if result.process_config:
+                logger.info(
+                    "process_detected",
+                    process_type=process_type,
+                    nodes=len(result.process_config.nodes),
+                    edges=len(result.process_config.edges),
+                    dynamic=discovered is not None,
+                )
+        except Exception as e:
+            logger.warning("process_detection_failed", error=str(e))
+            result.process_config = None
 
     @staticmethod
     def _build_context_question(question: str, context: list[dict]) -> str:

@@ -479,11 +479,16 @@ class ProcessDiscoveryEngine:
                 if "description" in ai:
                     proc.description = ai["description"]
                 if "stages" in ai and isinstance(ai["stages"], list):
-                    proc.stages = ai["stages"]
+                    # AI may return numbers instead of strings — coerce all to str
+                    proc.stages = [str(s) for s in ai["stages"]]
                 if "branches" in ai and isinstance(ai["branches"], dict):
-                    proc.branches = ai["branches"]
+                    proc.branches = {
+                        str(k): [str(v) for v in vs]
+                        for k, vs in ai["branches"].items()
+                        if isinstance(vs, list)
+                    }
                 if "stage_labels" in ai and isinstance(ai["stage_labels"], dict):
-                    proc.ai_labels = ai["stage_labels"]
+                    proc.ai_labels = {str(k): str(v) for k, v in ai["stage_labels"].items()}
                 if "stage_colors" in ai and isinstance(ai["stage_colors"], dict):
                     proc.ai_colors = ai["stage_colors"]
                 if "stage_icons" in ai and isinstance(ai["stage_icons"], dict):

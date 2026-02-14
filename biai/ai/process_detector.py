@@ -135,7 +135,7 @@ class ProcessDetector:
 
             # Match by stage values in data
             if proc.stages and len(proc.stages) >= 2:
-                stage_set = {s.lower() for s in proc.stages}
+                stage_set = {str(s).lower() for s in proc.stages}
                 for col in df.columns:
                     try:
                         data_values = {str(v).lower() for v in df[col].dropna().unique()}

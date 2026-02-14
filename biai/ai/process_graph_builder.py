@@ -412,8 +412,9 @@ class ProcessGraphBuilder:
             discovered: Optional DiscoveredProcess with stage ordering.
         """
         if discovered and discovered.stages:
-            known = discovered.stages
-            ordered = [s for s in known if s in states]
-            remaining = [s for s in states if s not in known]
+            known = [str(s) for s in discovered.stages]
+            str_states = {str(s) for s in states}
+            ordered = [s for s in known if s in str_states]
+            remaining = [s for s in str_states if s not in known]
             return ordered + sorted(remaining)
-        return sorted(states)
+        return sorted(str(s) for s in states)

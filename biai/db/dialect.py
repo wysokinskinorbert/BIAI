@@ -82,10 +82,20 @@ def _generate_docs_from_schema(schema: SchemaSnapshot) -> list[str]:
     """Generate natural-language documentation strings from schema snapshot."""
     docs = []
 
-    # Overview doc
-    table_names = [t.name for t in schema.tables]
+    # Determine schema prefix for table references
+    schema_prefix = ""
+    if schema.schema_name and schema.schema_name not in ("", "public", "USER"):
+        schema_prefix = f"{schema.schema_name}."
+        docs.append(
+            f"IMPORTANT: All tables belong to schema {schema.schema_name}. "
+            f"You MUST always use the schema prefix in queries: "
+            f"{schema.schema_name}.TABLE_NAME (e.g., {schema.schema_name}.{schema.tables[0].name if schema.tables else 'TABLE'})."
+        )
+
+    # Overview doc — use full_name when schema prefix is present
+    table_refs = [f"{schema_prefix}{t.name}" for t in schema.tables]
     docs.append(
-        f"The database contains {len(table_names)} tables: {', '.join(table_names)}."
+        f"The database contains {len(table_refs)} tables: {', '.join(table_refs)}."
     )
 
     # Per-table documentation
@@ -93,6 +103,7 @@ def _generate_docs_from_schema(schema: SchemaSnapshot) -> list[str]:
         col_descriptions = []
         pk_cols = []
         fk_descriptions = []
+        tbl_ref = f"{schema_prefix}{table.name}"
 
         for col in table.columns:
             desc = f"{col.name} ({col.data_type})"
@@ -104,7 +115,7 @@ def _generate_docs_from_schema(schema: SchemaSnapshot) -> list[str]:
                 )
             col_descriptions.append(desc)
 
-        parts = [f"Table {table.name} has columns: {', '.join(col_descriptions)}."]
+        parts = [f"Table {tbl_ref} has columns: {', '.join(col_descriptions)}."]
         if pk_cols:
             parts.append(f"Primary key: {', '.join(pk_cols)}.")
         if fk_descriptions:
@@ -115,10 +126,11 @@ def _generate_docs_from_schema(schema: SchemaSnapshot) -> list[str]:
     # Relationship summary
     relationships = []
     for table in schema.tables:
+        tbl_ref = f"{schema_prefix}{table.name}"
         for col in table.columns:
             if col.is_foreign_key and col.foreign_key_ref:
                 relationships.append(
-                    f"{table.name}.{col.name} -> {col.foreign_key_ref}"
+                    f"{tbl_ref}.{col.name} -> {col.foreign_key_ref}"
                 )
     if relationships:
         docs.append(
@@ -222,6 +234,11 @@ def _generate_examples_from_schema(
     is_oracle = db_type == DBType.ORACLE
     limit_clause = "FETCH FIRST {n} ROWS ONLY" if is_oracle else "LIMIT {n}"
 
+    # Schema prefix for non-default schemas
+    sp = ""
+    if schema.schema_name and schema.schema_name not in ("", "public", "USER"):
+        sp = f"{schema.schema_name}."
+
     table_map = {t.name.upper(): t for t in schema.tables}
 
     # Example 1: Simple SELECT with LIMIT from first table
@@ -230,14 +247,14 @@ def _generate_examples_from_schema(
         col_names = ", ".join(c.name for c in t.columns[:4])
         examples.append((
             f"Show first 10 rows from {t.name}",
-            f"SELECT {col_names} FROM {t.name} ORDER BY {t.columns[0].name} {limit_clause.format(n=10)}",
+            f"SELECT {col_names} FROM {sp}{t.name} ORDER BY {t.columns[0].name} {limit_clause.format(n=10)}",
         ))
 
     # Example 2: COUNT per table
     for t in schema.tables[:2]:
         examples.append((
             f"How many rows in {t.name}?",
-            f"SELECT COUNT(*) AS row_count FROM {t.name}",
+            f"SELECT COUNT(*) AS row_count FROM {sp}{t.name}",
         ))
 
     # Example 3: JOIN query using FK relationships
@@ -256,8 +273,8 @@ def _generate_examples_from_schema(
                     )
                     examples.append((
                         f"Show {t.name} with {ref_table.name} details",
-                        f"SELECT a.*, b.{ref_display} FROM {t.name} a "
-                        f"JOIN {ref_table.name} b ON a.{col.name} = b.{ref_pk} "
+                        f"SELECT a.*, b.{ref_display} FROM {sp}{t.name} a "
+                        f"JOIN {sp}{ref_table.name} b ON a.{col.name} = b.{ref_pk} "
                         f"{limit_clause.format(n=20)}",
                     ))
 
@@ -274,7 +291,7 @@ def _generate_examples_from_schema(
             examples.append((
                 f"Show total {num_col} grouped by {grp_col} from {t.name}",
                 f"SELECT {grp_col}, SUM({num_col}) AS total_{num_col.lower()} "
-                f"FROM {t.name} GROUP BY {grp_col} "
+                f"FROM {sp}{t.name} GROUP BY {grp_col} "
                 f"ORDER BY total_{num_col.lower()} DESC {limit_clause.format(n=10)}",
             ))
             break  # One aggregation example is enough
@@ -292,6 +309,11 @@ def _generate_cross_process_examples(
     examples: list[tuple[str, str]] = []
     is_oracle = db_type == DBType.ORACLE
 
+    # Schema prefix for non-default schemas
+    sp = ""
+    if schema.schema_name and schema.schema_name not in ("", "public", "USER"):
+        sp = f"{schema.schema_name}."
+
     # Find tables with date/timestamp columns for timeline queries
     table_dates: list[tuple[str, str]] = []  # (table_name, date_col_name)
     for table in schema.tables:
@@ -307,18 +329,11 @@ def _generate_cross_process_examples(
         # Build a UNION ALL monthly count example
         parts = []
         for tname, dcol in table_dates[:3]:
-            if is_oracle:
-                parts.append(
-                    f"SELECT TO_CHAR({dcol}, 'YYYY-MM') AS month, "
-                    f"'{tname}' AS source, COUNT(*) AS cnt "
-                    f"FROM {tname} GROUP BY TO_CHAR({dcol}, 'YYYY-MM')"
-                )
-            else:
-                parts.append(
-                    f"SELECT TO_CHAR({dcol}, 'YYYY-MM') AS month, "
-                    f"'{tname}' AS source, COUNT(*) AS cnt "
-                    f"FROM {tname} GROUP BY TO_CHAR({dcol}, 'YYYY-MM')"
-                )
+            parts.append(
+                f"SELECT TO_CHAR({dcol}, 'YYYY-MM') AS month, "
+                f"'{tname}' AS source, COUNT(*) AS cnt "
+                f"FROM {sp}{tname} GROUP BY TO_CHAR({dcol}, 'YYYY-MM')"
+            )
         union_sql = " UNION ALL ".join(parts) + " ORDER BY month"
         table_names = ", ".join(t for t, _ in table_dates[:3])
         examples.append((
@@ -363,7 +378,7 @@ def get_categorical_columns(schema: SchemaSnapshot) -> list[tuple[str, str]]:
             dtype_upper = col.data_type.upper()
             is_string = any(kw in dtype_upper for kw in ("VARCHAR", "CHAR", "TEXT", "NVARCHAR"))
             if is_string and col_upper in _CATEGORICAL_COLUMN_KEYWORDS:
-                results.append((table.name, col.name))
+                results.append((table.full_name, col.name))
     return results
 
 

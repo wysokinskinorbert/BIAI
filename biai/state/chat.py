@@ -88,8 +88,9 @@ class ChatState(rx.State):
     # Cancel streaming
     _cancel_requested: bool = False
 
-    # Schema training flag (lazy: trains on first query)
+    # Schema training flag (lazy: trains on first query, retrains on schema change)
     _schema_trained: bool = False
+    _trained_schema: str = ""
 
     # Clear chat confirmation
     confirm_clear: bool = False
@@ -295,10 +296,12 @@ class ChatState(rx.State):
             from biai.ai.pipeline import AIPipeline
             from biai.models.connection import DBType
             from biai.state.model import ModelState
+            from biai.state.schema import SchemaState
 
             # get_state must be called inside async with self
             async with self:
                 model_state = await self.get_state(ModelState)
+                schema_state = await self.get_state(SchemaState)
 
             selected_model = ""
             ollama_host = ""
@@ -306,18 +309,24 @@ class ChatState(rx.State):
                 selected_model = model_state.selected_model
                 ollama_host = model_state.ollama_host
 
+            selected_schema = ""
+            async with schema_state:
+                selected_schema = schema_state.selected_schema
+
             pipeline = AIPipeline(
                 connector=connector,
                 db_type=DBType(db_type_str),
                 ollama_model=selected_model,
                 ollama_host=ollama_host,
+                schema_name=selected_schema,
             )
 
-            # Lazy schema training (first query only)
-            schema_trained = False
+            # Lazy schema training (retrain when schema changes)
+            needs_training = False
             async with self:
-                schema_trained = self._schema_trained
-            if not schema_trained:
+                if not self._schema_trained or self._trained_schema != selected_schema:
+                    needs_training = True
+            if needs_training:
                 async with self:
                     self._update_last_message(content="Training schema... (first query only)")
                 try:
@@ -326,6 +335,7 @@ class ChatState(rx.State):
                     pass  # Training failure is non-fatal
                 async with self:
                     self._schema_trained = True
+                    self._trained_schema = selected_schema
 
             # Build conversation context for multi-turn
             context = []
