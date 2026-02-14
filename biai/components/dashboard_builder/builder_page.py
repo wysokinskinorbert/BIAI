@@ -397,27 +397,29 @@ def _template_picker_dialog() -> rx.Component:
     template_cards = []
     for idx, tpl in enumerate(DASHBOARD_TEMPLATES):
         template_cards.append(
-            rx.button(
-                rx.hstack(
-                    rx.icon(tpl["icon"], size=20, color="var(--accent-9)"),
-                    rx.vstack(
-                        rx.text(tpl["name"], size="2", weight="bold"),
-                        rx.text(tpl["description"], size="1", color="var(--gray-10)"),
-                        rx.text(
-                            f"{len(tpl['widgets'])} widgets",
-                            size="1",
-                            color="var(--gray-9)",
+            rx.dialog.close(
+                rx.button(
+                    rx.hstack(
+                        rx.icon(tpl["icon"], size=20, color="var(--accent-9)"),
+                        rx.vstack(
+                            rx.text(tpl["name"], size="2", weight="bold"),
+                            rx.text(tpl["description"], size="1", color="var(--gray-10)"),
+                            rx.text(
+                                f"{len(tpl['widgets'])} widgets",
+                                size="1",
+                                color="var(--gray-9)",
+                            ),
+                            spacing="0",
+                            align="start",
                         ),
-                        spacing="0",
-                        align="start",
+                        spacing="3",
+                        align="center",
+                        width="100%",
                     ),
-                    spacing="3",
-                    align="center",
+                    variant="outline",
                     width="100%",
+                    on_click=DashboardState.load_template(idx),
                 ),
-                variant="outline",
-                width="100%",
-                on_click=DashboardState.load_template(idx),
             )
         )
 

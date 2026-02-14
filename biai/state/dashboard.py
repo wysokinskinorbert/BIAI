@@ -203,13 +203,23 @@ class DashboardState(rx.State):
     @rx.var
     def editing_widget_type(self) -> str:
         for w in self.widgets:
-            if w.get("id") == self.editing_widget_id:
+            if isinstance(w, dict) and w.get("id") == self.editing_widget_id:
                 return w.get("widget_type", "")
         return ""
 
     def on_layout_change(self, new_layout: list[dict]):
         """Handle grid layout change from react-grid-layout."""
-        self.layout = new_layout
+        self.layout = [
+            {
+                "i": item.get("i", ""),
+                "x": int(item.get("x", 0)),
+                "y": int(item.get("y", 0)),
+                "w": int(item.get("w", 6)),
+                "h": int(item.get("h", 3)),
+            }
+            for item in new_layout
+            if item.get("i")
+        ]
 
     def add_widget(self, widget_type: str):
         """Add a new widget to the dashboard."""
@@ -318,24 +328,38 @@ class DashboardState(rx.State):
             "i": widget_id, "x": 0, "y": max_y, "w": 3, "h": 2,
         })
 
+    @rx.event(background=True)
     async def add_from_current_chart(self):
         """Copy the current chart from ChartState into dashboard as a widget."""
         from biai.state.chart import ChartState
-        chart = await self.get_state(ChartState)
-        if not chart.show_echarts:
-            return rx.toast.error("No chart to add")
-        self.add_chart_widget(
-            title=chart.chart_title or "Chart",
-            echarts_option=chart.echarts_option,
-        )
-        return rx.toast.success(f"Widget '{chart.chart_title or 'Chart'}' added to Dashboard Builder")
+
+        async with self:
+            chart = await self.get_state(ChartState)
+
+        async with chart:
+            show = chart.show_echarts
+            title = chart.chart_title or "Chart"
+            option = dict(chart.echarts_option) if chart.echarts_option else {}
+
+        if not show:
+            async with self:
+                return rx.toast.error("No chart to add")
+
+        async with self:
+            self.add_chart_widget(title=title, echarts_option=option)
+            return rx.toast.success(f"Widget '{title}' added to Dashboard Builder")
 
     # --- Persistence ---
 
     def save_dashboard(self):
         """Save current dashboard."""
+        import json as _json
+
         name = self.save_name or self.dashboard_name
-        DashboardStorage.save(name, self.widgets, self.layout)
+        # Convert Reflex state proxy objects to plain Python via JSON round-trip
+        widgets = _json.loads(_json.dumps(list(self.widgets)))
+        layout = _json.loads(_json.dumps(list(self.layout)))
+        DashboardStorage.save(name, widgets, layout)
         self.dashboard_name = name
         self.show_save_dialog = False
         self.saved_dashboards = DashboardStorage.list_dashboards()
@@ -347,6 +371,8 @@ class DashboardState(rx.State):
             self.widgets = data.get("widgets", [])
             self.layout = data.get("layout", [])
             self.dashboard_name = data.get("name", name)
+        else:
+            return rx.toast.error(f"Failed to load dashboard '{name}'")
 
     def delete_dashboard(self, name: str):
         DashboardStorage.delete(name)

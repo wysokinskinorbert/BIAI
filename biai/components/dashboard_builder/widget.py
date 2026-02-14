@@ -54,7 +54,7 @@ def dashboard_widget(widget: dict) -> rx.Component:
                 rx.cond(
                     widget["widget_type"] == "chart",
                     rx.cond(
-                        widget.contains("echarts_option"),
+                        widget["echarts_option"].to(dict).length() > 0,
                         rx.box(
                             echarts_component(
                                 option=widget["echarts_option"],
@@ -65,7 +65,12 @@ def dashboard_widget(widget: dict) -> rx.Component:
                             min_height="200px",
                         ),
                         rx.center(
-                            rx.text("No chart data", size="2", color="var(--gray-9)"),
+                            rx.vstack(
+                                rx.icon("bar-chart-3", size=24, color="var(--gray-8)", opacity=0.5),
+                                rx.text("No chart data", size="2", color="var(--gray-9)"),
+                                align="center",
+                                spacing="1",
+                            ),
                             flex="1",
                         ),
                     ),
