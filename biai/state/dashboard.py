@@ -10,6 +10,31 @@ from biai.utils.dashboard_storage import DashboardStorage
 # Pre-defined dashboard templates
 DASHBOARD_TEMPLATES: list[dict[str, Any]] = [
     {
+        "name": "AI Process Report",
+        "description": "Process flow analysis with KPIs, charts, and AI insights",
+        "icon": "workflow",
+        "widgets": [
+            {"widget_type": "kpi", "title": "Total Processes", "kpi_value": "—", "kpi_label": "Discovered Processes"},
+            {"widget_type": "kpi", "title": "Avg Duration", "kpi_value": "—", "kpi_label": "Avg Duration (min)"},
+            {"widget_type": "kpi", "title": "Bottlenecks", "kpi_value": "—", "kpi_label": "Bottleneck Steps"},
+            {"widget_type": "chart", "title": "Process Flow Overview"},
+            {"widget_type": "chart", "title": "Step Duration Breakdown"},
+            {"widget_type": "insight", "title": "AI Analysis", "insight_title": "Key Finding", "insight_description": "Ask AI to analyze your business processes — insights will appear here."},
+            {"widget_type": "table", "title": "Process Details"},
+            {"widget_type": "text", "title": "Summary", "content": "## Process Analysis Report\n\nUse the chat to ask about your business processes. Results from AI queries will populate these widgets.\n\n**Example queries:**\n- Show all business processes\n- What are the bottleneck steps?\n- Compare process durations"},
+        ],
+        "layout": [
+            {"w": 4, "h": 2, "x": 0, "y": 0},
+            {"w": 4, "h": 2, "x": 4, "y": 0},
+            {"w": 4, "h": 2, "x": 8, "y": 0},
+            {"w": 7, "h": 5, "x": 0, "y": 2},
+            {"w": 5, "h": 5, "x": 7, "y": 2},
+            {"w": 4, "h": 3, "x": 0, "y": 7},
+            {"w": 8, "h": 3, "x": 4, "y": 7},
+            {"w": 12, "h": 2, "x": 0, "y": 10},
+        ],
+    },
+    {
         "name": "Sales Overview",
         "description": "Revenue KPI, sales chart, and text note",
         "icon": "trending-up",

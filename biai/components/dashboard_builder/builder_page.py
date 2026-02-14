@@ -410,28 +410,40 @@ def _template_picker_dialog() -> rx.Component:
     """Dialog for selecting a dashboard template."""
     template_cards = []
     for idx, tpl in enumerate(DASHBOARD_TEMPLATES):
+        is_first = idx == 0
         template_cards.append(
             rx.dialog.close(
                 rx.button(
                     rx.hstack(
                         rx.icon(tpl["icon"], size=20, color="var(--accent-9)"),
                         rx.vstack(
-                            rx.text(tpl["name"], size="2", weight="bold"),
+                            rx.hstack(
+                                rx.text(tpl["name"], size="2", weight="bold"),
+                                *(
+                                    [rx.badge("Recommended", size="1", variant="solid", color_scheme="violet")]
+                                    if is_first
+                                    else []
+                                ),
+                                spacing="2",
+                                align="center",
+                            ),
                             rx.text(tpl["description"], size="1", color="var(--gray-10)"),
                             rx.text(
                                 f"{len(tpl['widgets'])} widgets",
                                 size="1",
                                 color="var(--gray-9)",
                             ),
-                            spacing="0",
+                            spacing="1",
                             align="start",
                         ),
                         spacing="3",
                         align="center",
                         width="100%",
                     ),
-                    variant="outline",
+                    variant="soft" if is_first else "outline",
                     width="100%",
+                    height="auto",
+                    padding="12px 16px",
                     on_click=DashboardState.load_template(idx),
                 ),
             )
@@ -446,14 +458,15 @@ def _template_picker_dialog() -> rx.Component:
             ),
             rx.vstack(
                 *template_cards,
+                rx.separator(),
                 rx.dialog.close(
                     rx.button("Cancel", variant="outline", size="2", width="100%"),
                 ),
-                spacing="2",
+                spacing="3",
                 width="100%",
-                padding_top="8px",
+                padding_top="12px",
             ),
-            max_width="420px",
+            max_width="480px",
         ),
         open=DashboardState.show_template_picker,
         on_open_change=DashboardState.set_show_template_picker,
