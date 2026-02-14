@@ -43,6 +43,19 @@ def model_selector() -> rx.Component:
             spacing="2",
         ),
 
+        # Save as default
+        rx.tooltip(
+            rx.button(
+                rx.icon("save", size=14),
+                "Set as default",
+                on_click=ModelState.save_as_default,
+                variant="ghost",
+                size="1",
+                width="100%",
+            ),
+            content="Save selected model as default (in .env)",
+        ),
+
         # Error (CSS display to avoid ghost a11y node)
         rx.callout(
             ModelState.error,

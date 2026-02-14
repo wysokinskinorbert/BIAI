@@ -2,7 +2,7 @@
 
 # AI Pipeline
 MAX_RETRIES: int = 5
-DEFAULT_MODEL: str = "qwen2.5-coder:7b-instruct-q4_K_M"
+DEFAULT_MODEL: str = "qwen3-coder:30b"
 DEFAULT_OLLAMA_HOST: str = "http://localhost:11434"
 DEFAULT_CHROMA_HOST: str = "http://localhost:8000"
 DEFAULT_CHROMA_COLLECTION: str = "biai_schema"

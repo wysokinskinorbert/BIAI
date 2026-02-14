@@ -2,15 +2,18 @@
 
 import reflex as rx
 
-from biai.config.constants import DEFAULT_MODEL, DEFAULT_OLLAMA_HOST
+from biai.config.settings import get_settings, save_env_setting
+
+# Read saved settings (from .env or defaults)
+_settings = get_settings()
 
 
 class ModelState(rx.State):
     """State for Ollama model selection."""
 
-    available_models: list[str] = [DEFAULT_MODEL]
-    selected_model: str = DEFAULT_MODEL
-    ollama_host: str = DEFAULT_OLLAMA_HOST
+    available_models: list[str] = [_settings.ollama_model]
+    selected_model: str = _settings.ollama_model
+    ollama_host: str = _settings.ollama_host
     is_loading: bool = False
     error: str = ""
 
@@ -19,6 +22,21 @@ class ModelState(rx.State):
 
     def set_ollama_host(self, value: str):
         self.ollama_host = value
+
+    def save_as_default(self):
+        """Save current model and host as defaults in .env."""
+        try:
+            save_env_setting("OLLAMA_MODEL", self.selected_model)
+            save_env_setting("OLLAMA_HOST", self.ollama_host)
+            return rx.toast.success(
+                f"Saved as default: {self.selected_model}",
+                duration=3000,
+            )
+        except Exception as e:
+            return rx.toast.error(
+                f"Failed to save: {e}",
+                duration=5000,
+            )
 
     @rx.event(background=True)
     async def refresh_models(self):
