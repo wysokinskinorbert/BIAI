@@ -23,7 +23,7 @@ _discovery_cache = ProcessDiscoveryCache()
 from biai.ai.prompt_templates import DESCRIPTION_PROMPT, SYSTEM_PROMPT, format_dialect_rules
 from biai.config.constants import DEFAULT_MODEL, DEFAULT_OLLAMA_HOST, DEFAULT_CHROMA_COLLECTION, USE_DYNAMIC_DISCOVERY
 from biai.db.base import DatabaseConnector
-from biai.db.dialect import DialectHelper
+from biai.db.dialect import DialectHelper, get_categorical_columns, build_distinct_values_docs
 from biai.db.schema_manager import SchemaManager
 from biai.db.query_executor import QueryExecutor
 from biai.models.connection import DBType
@@ -163,7 +163,46 @@ class AIPipeline:
             examples.extend(get_process_examples(snapshot, is_oracle=is_oracle))
             logger.info("process_training_data_added", is_oracle=is_oracle)
 
+        # P3: Auto-discover DISTINCT values for categorical columns
+        try:
+            cat_cols = get_categorical_columns(snapshot)
+            if cat_cols:
+                distinct_map = await self._discover_distinct_values(cat_cols)
+                value_docs = build_distinct_values_docs(distinct_map)
+                docs.extend(value_docs)
+                logger.info("distinct_values_discovered", columns=len(cat_cols), docs=len(value_docs))
+        except Exception as e:
+            logger.warning("distinct_values_discovery_failed", error=str(e))
+
         return self._trainer.train_full(schema=snapshot, docs=docs, examples=examples)
+
+    async def _discover_distinct_values(
+        self, columns: list[tuple[str, str]], max_values: int = 30,
+    ) -> dict[str, dict[str, list[str]]]:
+        """Query DB for DISTINCT values of categorical columns.
+
+        Args:
+            columns: List of (table_name, column_name) pairs.
+            max_values: Max distinct values per column (skip if more).
+
+        Returns:
+            {table_name: {col_name: [val1, val2, ...]}}
+        """
+        result: dict[str, dict[str, list[str]]] = {}
+        for table, col in columns:
+            try:
+                sql = (
+                    f"SELECT DISTINCT {col} FROM {table} "
+                    f"WHERE {col} IS NOT NULL "
+                    f"ORDER BY {col}"
+                )
+                df = await self._connector.execute_query(sql, timeout=10)
+                values = df.iloc[:, 0].dropna().astype(str).tolist()
+                if 0 < len(values) <= max_values:
+                    result.setdefault(table, {})[col] = values
+            except Exception as e:
+                logger.debug("distinct_query_failed", table=table, col=col, error=str(e))
+        return result
 
     async def process(
         self, question: str, context: list[dict] | None = None,
@@ -468,6 +507,7 @@ def _extract_key_points(df: pd.DataFrame, max_points: int = 5) -> str:
 
     points = []
     num_cols = df.select_dtypes(include=["number"]).columns
+    cat_cols = df.select_dtypes(exclude=["number"]).columns
 
     for col in num_cols[:3]:
         try:
@@ -475,8 +515,20 @@ def _extract_key_points(df: pd.DataFrame, max_points: int = 5) -> str:
         except (TypeError, ValueError):
             points.append(f"- {col}: {df[col].nunique()} unique values")
 
+    # P5: Explicit ranking for categorical+numeric pairs to prevent LLM ranking errors
+    if len(cat_cols) >= 1 and len(num_cols) >= 1:
+        cat_col = cat_cols[0]
+        val_col = num_cols[0]
+        try:
+            ranked = df.groupby(cat_col)[val_col].sum().sort_values(ascending=False)
+            if len(ranked) >= 2:
+                ranking_lines = [f"  #{i+1}: {cat}={val:.2f}" for i, (cat, val) in enumerate(ranked.head(5).items())]
+                points.append(f"- RANKING by {val_col} (descending):\n" + "\n".join(ranking_lines))
+        except Exception:
+            pass
+
     # Include actual data rows to prevent LLM hallucination
     preview = df.head(max_points).to_string(index=False)
     points.append(f"\nActual data (first {min(len(df), max_points)} rows):\n{preview}")
 
-    return "\n".join(points[:max_points])
+    return "\n".join(points[:max_points + 2])

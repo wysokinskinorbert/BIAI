@@ -151,7 +151,10 @@ class InsightAgent:
 
     @staticmethod
     def _check_trend(df: pd.DataFrame, col: str) -> Insight | None:
-        """Detect consistent increasing/decreasing trend."""
+        """Detect consistent increasing/decreasing trend.
+
+        Skips columns that are strictly monotonic (sorted data artifact, not a real trend).
+        """
         try:
             values = df[col].dropna().values
             if len(values) < _TREND_MIN_POINTS:
@@ -160,6 +163,11 @@ class InsightAgent:
             increasing = (diffs > 0).sum()
             decreasing = (diffs < 0).sum()
             total_diffs = len(diffs)
+
+            # P6: Skip if data is strictly monotonic — likely sorted by this column,
+            # not a real temporal trend (e.g. ORDER BY value ASC)
+            if increasing == total_diffs or decreasing == total_diffs:
+                return None
 
             if increasing / total_diffs > 0.75:
                 change = round((values[-1] - values[0]) / max(abs(values[0]), 1) * 100, 1)
