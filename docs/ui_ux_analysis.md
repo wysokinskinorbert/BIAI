@@ -1,8 +1,8 @@
 # BIAI - Kompleksowa Analiza UI/UX
 
-**Data:** 2026-02-13
-**Metoda:** 20 zapytan testowych pokrywajacych wszystkie typy wizualizacji
-**Screenshoty:** `docs/ui_analysis/q01-q20`
+**Data:** 2026-02-13 (Q1-Q20), 2026-02-14 (Q21-Q30)
+**Metoda:** 30 zapytan testowych pokrywajacych wszystkie typy wizualizacji, multi-step analysis, edge cases
+**Screenshoty:** `docs/ui_analysis/q01-q20`, `docs/ui_analysis/q21-q30`
 
 ---
 
@@ -13,12 +13,20 @@ Jednak warstwa prezentacji danych wymaga istotnych usprawnien, aby system mogl b
 za profesjonalne narzedzie BI. Glowne problemy dotycza:
 
 - **Layout Process Flow** - wezly ukladaja sie w pionowa kolumne zamiast wykorzystywac
-  dostepna przestrzen horyzontalnie
+  dostepna przestrzen horyzontalnie (POPRAWIONE w Q21-Q30: layout LR dziala!)
 - **Dobor typow wykresow** - chart advisor nie rozpoznaje niektorych wzorcow danych
   (np. dane procentowe -> bar zamiast pie)
 - **Brak dynamicznego skalowania** - stale wysokosci wykresow (350px) i process flow (400px)
   nie dostosowuja sie do zlozonosci danych
 - **Brak kluczowych komponentow BI** - karty KPI, heatmapy, drill-down, multi-dashboard
+
+**NOWE (Q21-Q30) - krytyczne problemy pipeline'u:**
+- **Multi-step analysis context contamination** - planner re-wykonuje zapytania z poprzednich
+  tur rozmowy zamiast generowac nowe (Q28)
+- **AI halucynacje** - opis wynikow oparty na danych z INNEGO zapytania (Q28, Q30)
+- **LIMIT ignorowany** - SQL ma LIMIT 5, ale wynik to 447 wierszy (Q27)
+- **Dashboard state inconsistency** - tytul z Q26, dane z Q27, Process Flow z Q26 (Q27-Q30)
+- **Analysis Steps globalny stan** - steps z Q30 wyswietlane pod wiadomoscia Q28
 
 ---
 
@@ -420,15 +428,268 @@ Kiedy AI przetwarza pytanie, dashboard stoi pusty lub pokazuje stare dane.
 
 ---
 
-## 10. Podsumowanie
+---
+
+## 10. Wyniki Testow Q21-Q30 (2026-02-14)
+
+### 10.1 Nowe Problemy Krytyczne
+
+#### 10.1.1 Multi-step analysis context contamination (CRITICAL)
+
+**Dotyczy:** Q28
+**Pliki:** `biai/ai/analysis_planner.py`, `biai/ai/pipeline.py`
+
+**Problem:** AnalysisPlanner otrzymuje kontekst rozmowy i generuje kroki na bazie
+POPRZEDNICH zapytan zamiast BIEZACEGO. Q28 ("handlowiec z najlepsza konwersja") dostal
+plan: Step 1 = "Find orders without process log entries" (to Q26!), Step 2 = "Filter
+sales_pipeline for closed_won" (to dopiero Q28). Step 2 failed, wiec pipeline zwrocil
+dane z Step 1 = Q26 dane.
+
+**Efekt:** Odpowiedz na Q28 to dane z Q26. AI halucynuje opis na bazie Q26 danych.
+
+**Sugerowane rozwiazanie:**
+1. Wyczysc kontekst rozmowy przed planowaniem multi-step (nie przekazuj ctx do planner)
+2. Waliduj kroki: kazdy step musi byc semantycznie powiazany z pytaniem
+3. Jesli Step 1 pokrywa sie z ostatnim zapytaniem, pomin go
+
+#### 10.1.2 LIMIT ignorowany w wynikach (CRITICAL)
+
+**Dotyczy:** Q27
+**Pliki:** `biai/ai/sql_validator.py`, `biai/db/query_executor.py`
+
+**Problem:** SQL: `...ORDER BY ticket_count DESC LIMIT 5` ale Results: 447 wierszy.
+Mozliwe przyczyny: (a) sqlglot transpilation usunela LIMIT, (b) validator zmienil SQL,
+(c) inny SQL zostal wykonany niz wyswietlony.
+
+**Sugerowane rozwiazanie:**
+1. Logowac finalne SQL po walidacji/transpilacji
+2. Porownac SQL w Generated SQL z faktycznie wykonanym
+3. Sprawdzic czy sqlglot transpilation zachowuje LIMIT
+
+#### 10.1.3 Type comparison error w pipeline (CRITICAL)
+
+**Dotyczy:** Q27
+**Pliki:** `biai/ai/chart_advisor.py` lub `biai/ai/insight_agent.py`
+
+**Problem:** `'<' not supported between instances of 'str' and 'float'` - blad
+porownania typow w post-processingu (chart advisor lub insight generation).
+Dane z multi-JOIN zawieraja mieszane typy kolumn.
+
+**Sugerowane rozwiazanie:**
+1. Dodac `try/except TypeError` w chart_advisor.recommend()
+2. Wymuszac numeryczne typy: `df[col] = pd.to_numeric(df[col], errors='coerce')`
+3. Testy: multi-JOIN z mieszanymi typami kolumn
+
+#### 10.1.4 AI halucynacje oparte na danych z innego zapytania (CRITICAL)
+
+**Dotyczy:** Q28, Q30
+**Pliki:** `biai/ai/pipeline.py`, `biai/state/chat.py`
+
+**Problem:** AI opis Q28 mowi o "order IDs from 10 to 500, averaging 304.56" = dane z Q26.
+Q30 mowi o "no variation between min, max, avg of 250" = bezsensowne dla COUNT.
+Pipeline uzywa `_extract_key_points(df)` z niewlasciwego DataFrame.
+
+### 10.2 Nowe Problemy Wysokie (HIGH)
+
+#### 10.2.1 Dashboard state inconsistency
+
+**Dotyczy:** Q27, Q28, Q29, Q30
+
+**Problem:** Po bledzie lub multi-step analysis:
+- Tytul dashboardu z Q26
+- Dane w Results z Q27 (lub stale Q26 przy bledzie)
+- Process Flow z Q26
+- Follow-up suggestions z Q26
+
+Dashboard nie czyści stanu po nowym zapytaniu jesli ono bleduje.
+
+#### 10.2.2 Analysis Steps globalny stan zamiast per-message
+
+**Dotyczy:** Q28, Q30
+**Pliki:** `biai/state/chat.py`, `biai/components/chat_message.py`
+
+**Problem:** `ChatState.analysis_steps` to globalny var. Kiedy Q30 aktualizuje steps,
+WSZYSTKIE wiadomosci z `is_multi_step=True` pokazuja Q30 steps - nawet Q28.
+Powinno byc per-message (jak `insights` po poprawce z Phase 2).
+
+**Sugerowane rozwiazanie:** Przeniesc `analysis_steps` do `message["analysis_steps"]`
+analogicznie do poprawki `insights` z commitu d7f872d.
+
+#### 10.2.3 SQL section nie rozwijalna (Q22)
+
+**Dotyczy:** Q22
+**Problem:** Klikniecie "Generated SQL" w dashboardzie nie rozwija sekcji SQL.
+Uzytkownik nie moze zobaczyc wygenerowanego zapytania.
+
+#### 10.2.4 Bledne obliczenia procentowe
+
+**Dotyczy:** Q22, Q24, Q30
+**Problem:**
+- Q22: "Ile % wnioskow odrzucanych?" → wynik "0E-20" zamiast ~13.5% (27/200)
+- Q24: "Typ wniosku z najwyzszym odrzuceniem" → 0 wierszy (powinny byc dane)
+- Q30: "% reopened ticketow" → 250 (total count zamiast procentu)
+
+AI nie umie obliczac procentow w jednym zapytaniu SQL. Potrzebne wzorce:
+`COUNT(CASE WHEN status='rejected' THEN 1 END) * 100.0 / COUNT(*)`
+
+### 10.3 Nowe Problemy Srednie (MEDIUM)
+
+- **Follow-up suggestions z poprzedniego zapytania** (Q27-Q30)
+- **Error pokazuje tylko Attempt 4-5** nie wszystkie proby (Q23, Q29)
+- **Dashboard stale dane po bledzie** - nie czyści się (Q29)
+- **Brak "0 rows" badge** przy pustych wynikach (Q24)
+- **Liczby bez separatorow tysiecy** na pie chart (Q25)
+- **Key Metric wyswietla zly typ** - COUNT zamiast % (Q30)
+
+### 10.4 Pozytywne Obserwacje (Q21-Q30)
+
+1. **Process Flow layout LR** - teraz horyzontalny! Poprawka z Phase 4 dziala (Q26)
+2. **PIE chart poprawnie wybrany** dla "rozklad kwot" (Q25) - heurystyka "rozklad" dziala
+3. **Per-message Insights** - insights wyswietlane per wiadomosc (poprawka d7f872d)
+4. **LEFT JOIN + NULL** - AI poprawnie uzywa tego wzorca (Q26)
+5. **Key Metric component** - ladny duzy numer dla single-value wynikow (Q30)
+6. **Retry button** - poprawnie wyswietlany przy bledach
+7. **Paginacja** - dziala dla duzych zbiorow (Q26: 1/26, Q27: 1/30)
+
+---
+
+## 11. Szczegolowa Analiza Q21-Q30
+
+### Q21: "Jaki jest trend liczby nowych ticketow miesiecznie?"
+- **Wynik:** Line chart, 5 wierszy (5 miesiecy z danymi)
+- **Wykres:** Liniowy z adnotacjami markPoint/markLine
+- **Problemy:**
+  - Os X pokazuje "2024.0" (float zamiast formatu daty/miesiaca)
+  - Tylko 5 miesiecy z danymi (seed data ograniczone)
+  - Tytul wyklesu obciety
+  - Adnotacje markPoint nachodza na siebie
+
+### Q22: "Ile procent wnioskow jest odrzucanych?"
+- **Wynik:** Key Metric "0E-20" (notacja naukowa!)
+- **SQL:** Zly wzorzec - nie uzywa COUNT(CASE WHEN...) * 100.0 / COUNT(*)
+- **Problemy CRITICAL:**
+  - Wartosc "0E-20" zamiast ~13.5% (27/200 rejected)
+  - Brak aliasu kolumny ("?column?")
+  - Sekcja "Generated SQL" nie rozwijalna (BUG UI)
+  - Brak przycisku "Add to Dashboard Builder"
+
+### Q23: "Pokaz korelacje miedzy wartoscia zamowienia a czasem realizacji"
+- **Wynik:** ERROR po 5 probach
+- **Blad:** `column "updated_at"/"resolved_at" does not exist`
+- **Problemy:**
+  - AI myli kolumny miedzy tabelami
+  - Dashboard fallback do Database Schema
+  - Follow-up wyswietlane po bledzie
+  - Error pokazuje tylko Attempt 4-5
+
+### Q24: "Ktory typ wniosku ma najwyzszy wskaznik odrzucen?"
+- **Wynik:** 0 wierszy (powinny byc dane)
+- **SQL:** Ten sam problem co Q22 - bledny wzorzec procentowy
+- **Problemy:**
+  - Dashboard fallback do Schema
+  - Follow-up po pustych wynikach
+  - Brak badge "0 rows"
+
+### Q25: "Pokaz rozklad kwot wnioskow po typach"
+- **Wynik:** SUCCESS - PIE chart, 5 wierszy
+- **Wykres:** Pie chart poprawnie wybrany (keyword "rozklad")
+- **Problemy:**
+  - Liczby bez separatorow tysiecy
+  - Legenda nachodzi na etykiety
+  - Brak procentow na label pie
+- **POZYTYWNE:** PIE chart poprawnie dobrany!
+
+### Q26: "Ile zamowien nie ma zadnych wpisow w process log?"
+- **Wynik:** SUCCESS - 380 wierszy, LEFT JOIN + IS NULL
+- **Problemy:**
+  - Process Flow wykryty ale semantycznie bledny (pytanie o BRAK procesow)
+  - Insights na order_id PK bezsensowne (upward trend +4900%)
+  - Pytanie "ile" powinno zwrocic COUNT, nie liste
+- **POZYTYWNE:** Process Flow layout HORYZONTALNY! Paginacja 1/26 dziala!
+
+### Q27: "Pokaz top 5 klientow z najwieksza liczba ticketow i ich laczna wartosc zamowien"
+- **Wynik:** ERROR - `'<' not supported between instances of 'str' and 'float'`
+- **SQL:** `...ORDER BY ticket_count DESC LIMIT 5` ale wynik 447 wierszy
+- **Problemy CRITICAL:**
+  - LIMIT 5 zignorowany (447 rows)
+  - Brak kolumny "total order value" (SQL nie laczy z orders)
+  - Type comparison error w post-processingu
+  - Dashboard tytul z Q26, dane z Q27
+  - Process Flow z Q26 nadal wyswietlany
+
+### Q28: "Ktory handlowiec ma najlepsza konwersje closed_won?"
+- **Wynik:** Multi-step analysis - Step 1 = Q26 query (!), Step 2 = failed
+- **Problemy CRITICAL:**
+  - Context contamination: Step 1 re-wykonuje Q26
+  - HALUCYNACJA: opis mowi o "order IDs 10-500, avg 304.56" (Q26 dane)
+  - Dashboard: 380 rows order_id = Q26 dane
+  - Step 2 (wlasciwy krok) FAILED
+
+### Q29: "Pokaz liczbe zamowien, ticketow i wnioskow miesiecznie"
+- **Wynik:** ERROR po 5 probach
+- **Blad:** `column "ticket_id" does not exist` (x5)
+- **Problemy:**
+  - Self-correction nie poprawia - 5x ten sam blad
+  - Brak kolumny ticket_id (powinno byc id w support_tickets)
+  - Dashboard stale dane Q26
+
+### Q30: "Jaki procent ticketow jest ponownie otwieranych?"
+- **Wynik:** Multi-step: Step 1 = 0 reopened, Step 2 = COUNT(*) = 250
+- **Dashboard:** Key Metric "250", SQL: `SELECT COUNT(*) FROM support_tickets`
+- **Problemy:**
+  - Odpowiedz to COUNT, nie procent (powinno: "0%")
+  - Opis AI bezsensowny ("no variation between min, max, avg")
+  - Analysis Steps z Q30 pod wiadomoscia Q28 (globalny stan)
+  - Brak Step 3: "Calculate percentage"
+
+---
+
+## 12. Podsumowanie Statystyczne Q1-Q30
+
+| Metryka | Q1-Q20 | Q21-Q30 | Lacznie |
+|---------|--------|---------|---------|
+| Zapytan | 20 | 10 | 30 |
+| Sukces (poprawne dane) | 16 | 3 (Q25, Q26, Q30*) | 19 |
+| Bledne dane | 2 | 3 (Q22, Q24, Q27) | 5 |
+| Error (brak wynikow) | 2 | 4 (Q23, Q27, Q28, Q29) | 6 |
+| Multi-step triggered | 0 | 3 (Q28, Q30, partial Q29) | 3 |
+| Multi-step poprawny | 0 | 0 | 0 |
+
+*Q30 technicznie sukces (dane zwrocone), ale nie odpowiada na pytanie
+
+### Rozklad problemow wg severity (Q21-Q30)
+
+| Severity | Ilosc | Opis |
+|----------|-------|------|
+| CRITICAL | 5 | Context contamination, LIMIT ignored, type error, hallucination, wrong percentage |
+| HIGH | 6 | Dashboard inconsistency, global analysis_steps, SQL section, percentage patterns |
+| MEDIUM | 6 | Follow-up stale, error truncated, stale dashboard, 0-rows badge, separators, Key Metric |
+| LOW | 3 | React Hooks warning, ECharts DOM, pie legend overlap |
+
+---
+
+## 13. Zaktualizowane Podsumowanie
 
 Aplikacja BIAI ma solidny backend (pipeline AI, SQL validation, self-correction) i dobrze
-realizuje podstawowy flow konwersacyjny. Glowne wyzwania leza w **warstwie prezentacji**:
+realizuje podstawowy flow konwersacyjny. Glowne wyzwania leza w **warstwie prezentacji**
+oraz **pipeline multi-step analysis**:
 
-1. **Process Flow layout** to najpilniejszy problem - wezly w pionie sa nieczytelne
-2. **Adaptacyjne rozmiary** komponentow znacznie poprawia UX
-3. **Lepszy dobor typow wykresow** (pie, horizontal bars, grouped bars) to quick win
+### Pilne poprawki (Q21-Q30 findings):
+
+1. **Multi-step analysis planner** - context contamination to showstopper; planner
+   musi ignorowac lub walidowac kontekst rozmowy
+2. **Analysis Steps per-message** - analogicznie do poprawki insights (d7f872d)
+3. **LIMIT preservation** - zweryfikowac ze sqlglot/validator nie usuwaja LIMIT
+4. **Type safety w post-processingu** - try/except + pd.to_numeric() w chart_advisor
+5. **Dashboard state cleanup** - czysc tytul/process/results po nowym zapytaniu
+6. **Percentage SQL patterns** - dodac training examples z COUNT(CASE WHEN...)
+
+### Istniejace priorytety (Q1-Q20 findings):
+
+1. **Process Flow layout** - POPRAWIONY (LR dziala w Q26)
+2. **Adaptacyjne rozmiary** komponentow
+3. **Lepszy dobor typow wykresow** (pie heurystyka POPRAWIONA w Q25)
 4. **Karty KPI** i **drill-down** sa kluczowe dla profesjonalnego BI
 
-Implementacja Faz 1-2 (Quick Wins + Layout) zajmie ~5-7 dni i przyniesie
-najwiekszy wzrost jakosci UX. Fazy 3-4 buduja profesjonalny system BI.
+Implementacja poprawek Q21-Q30 powinna miec wyzszy priorytet niz nowe features,
+poniewaz dotycza blednosci danych i halucynacji AI, co podwaza zaufanie uzytkownika.
