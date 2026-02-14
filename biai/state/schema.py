@@ -147,6 +147,11 @@ class SchemaState(rx.State):
             mean_val = stats.get("mean")
             null_pct = float(stats.get("null_pct", 0.0))
             distinct = int(stats.get("distinct_count", 0))
+            semantic = str(cp.get("semantic_type", "unknown"))
+
+            # Hide mean for DATE/TIMESTAMP columns (avg of timestamps is meaningless)
+            if mean_val is not None and "DATE" in semantic.upper():
+                mean_val = None
 
             # Look up glossary description for this column
             col_name = str(cp.get("column_name", ""))
@@ -157,7 +162,7 @@ class SchemaState(rx.State):
             flat: dict[str, str] = {
                 "column_name": col_name,
                 "data_type": str(cp.get("data_type", "")),
-                "semantic_type": str(cp.get("semantic_type", "unknown")),
+                "semantic_type": semantic.replace("SemanticType.", ""),
                 "null_pct": f"{null_pct:.1f}",
                 "distinct_count": str(distinct),
                 "mean": f"{mean_val:.2f}" if mean_val is not None else "",
@@ -384,27 +389,29 @@ class SchemaState(rx.State):
                     tbl_columns[table.name] = cols
 
                 # Try loading cached profiles and glossary
+                # Only for default schema — cache is keyed by db_name, not schema
                 cached_profiles: dict[str, dict] = {}
                 cached_glossary: dict[str, dict] = {}
-                db_name = config.database or "default"
-                try:
-                    from biai.ai.data_profiler import DataProfiler
-                    cached = DataProfiler.load_cache(db_name)
-                    if cached:
-                        cached_profiles = {
-                            k: v.model_dump() for k, v in cached.items()
-                        }
-                except Exception:
-                    pass
-                try:
-                    from biai.ai.business_glossary import BusinessGlossaryGenerator
-                    gl = BusinessGlossaryGenerator.load_cache(db_name)
-                    if gl:
-                        cached_glossary = {
-                            td.name: td.model_dump() for td in gl.tables
-                        }
-                except Exception:
-                    pass
+                if not current_schema:
+                    db_name = config.database or "default"
+                    try:
+                        from biai.ai.data_profiler import DataProfiler
+                        cached = DataProfiler.load_cache(db_name)
+                        if cached:
+                            cached_profiles = {
+                                k: v.model_dump() for k, v in cached.items()
+                            }
+                    except Exception:
+                        pass
+                    try:
+                        from biai.ai.business_glossary import BusinessGlossaryGenerator
+                        gl = BusinessGlossaryGenerator.load_cache(db_name)
+                        if gl:
+                            cached_glossary = {
+                                td.name: td.model_dump() for td in gl.tables
+                            }
+                    except Exception:
+                        pass
 
                 # Also fetch available schemas if not yet loaded
                 schemas_list: list[str] = []

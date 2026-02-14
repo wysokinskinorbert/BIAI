@@ -293,7 +293,7 @@ BEGIN
         INSERT INTO quality_checks (po_id, inspector, check_date, status, defect_count, notes)
         VALUES (
             v_po_id,
-            'Inspector ' || MOD(i, 8) + 1,
+            'Inspector ' || (MOD(i, 8) + 1),
             SYSDATE - DBMS_RANDOM.VALUE(1, 90),
             v_qc_statuses(MOD(i, 10) + 1),
             CASE WHEN v_qc_statuses(MOD(i, 10) + 1) = 'failed' THEN FLOOR(DBMS_RANDOM.VALUE(1, 20)) ELSE 0 END,
@@ -449,7 +449,7 @@ BEGIN
         INSERT INTO audit_items (audit_area, auditor, status, priority, planned_date, completed_date, findings)
         VALUES (
             v_audit_areas(MOD(i, 8) + 1),
-            'Auditor ' || MOD(i, 5) + 1,
+            'Auditor ' || (MOD(i, 5) + 1),
             v_aud_statuses(MOD(i, 10) + 1),
             CASE MOD(i, 3) WHEN 0 THEN 'high' WHEN 1 THEN 'medium' ELSE 'low' END,
             SYSDATE - DBMS_RANDOM.VALUE(1, 180),

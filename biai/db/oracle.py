@@ -206,10 +206,15 @@ class OracleConnector(DatabaseConnector):
                 'SI_INFORMTN_SCHEMA','DVSYS','DBSFWUSER','REMOTE_SCHEDULER_AGENT',
                 'DIP','OJVMSYS','GGSYS','MDDATA','XS$NULL','FLOWS_FILES',
                 'APEX_PUBLIC_USER','APEX_040000','APEX_040200','APEX_050000',
-                'APEX_230100'
+                'APEX_230100',
+                'AUDSYS','DGPDB_INT','DVF','GSMCATUSER','GSMUSER',
+                'PDBADMIN','SYSBACKUP','SYSDG','SYSKM','SYSRAC',
+                'GGSHAREDCAP','GSMROOTUSER'
             )
             AND username NOT LIKE 'APEX%'
             AND username NOT LIKE 'FLOWS_%'
+            AND username NOT LIKE 'OPS$%'
+            AND username NOT LIKE 'SYS$%'
             ORDER BY username
         """
         df = await self.execute_query(sql)
