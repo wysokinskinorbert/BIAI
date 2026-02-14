@@ -77,6 +77,24 @@ def data_explorer() -> rx.Component:
             ),
         ),
 
+        # Schema selector
+        rx.cond(
+            DBState.is_connected & SchemaState.has_schemas,
+            rx.hstack(
+                rx.icon("database", size=14, color="var(--accent-9)"),
+                rx.select(
+                    SchemaState.schema_options,
+                    value=SchemaState.selected_schema_display,
+                    on_change=SchemaState.set_schema,
+                    size="1",
+                    width="100%",
+                ),
+                width="100%",
+                align="center",
+                spacing="2",
+            ),
+        ),
+
         # Search
         rx.cond(
             DBState.is_connected,

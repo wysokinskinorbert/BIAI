@@ -12,6 +12,7 @@ services:
       - ./scripts/oracle-seed.sql:/container-entrypoint-initdb.d/01-seed.sql
       - ./scripts/oracle-process-seed.sql:/container-entrypoint-initdb.d/02-process-seed.sql
       - ./scripts/oracle-process-fix.sql:/container-entrypoint-initdb.d/03-process-fix.sql
+      - ./scripts/oracle-discovery-seed.sql:/container-entrypoint-initdb.d/04-discovery-seed.sql
     healthcheck:
       test: ["CMD", "healthcheck.sh"]
       interval: 30s

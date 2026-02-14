@@ -48,6 +48,10 @@ class DatabaseConnector(ABC):
         """Get complete schema snapshot for training."""
 
     @abstractmethod
+    async def get_schemas(self) -> list[str]:
+        """Get list of available schemas/users."""
+
+    @abstractmethod
     async def get_server_version(self) -> str:
         """Get database server version string."""
 

@@ -122,27 +122,42 @@ class OracleConnector(DatabaseConnector):
                     """, tname=tname, owner=owner_param)
                     col_rows = cursor.fetchall()
 
-                    # Get primary key columns
+                    # Resolve actual owner for constraint queries
+                    if schema_filter == "USER":
+                        cursor.execute("SELECT USER FROM DUAL")
+                        actual_owner = cursor.fetchone()[0]
+                    else:
+                        actual_owner = schema_filter
+
+                    # Get primary key columns (all_constraints works across schemas)
                     pk_query = (
                         "SELECT cols.column_name "
-                        "FROM user_constraints cons "
-                        "JOIN user_cons_columns cols ON cons.constraint_name = cols.constraint_name "
-                        "WHERE cons.constraint_type = 'P' AND cons.table_name = :tname"
+                        "FROM all_constraints cons "
+                        "JOIN all_cons_columns cols "
+                        "  ON cons.owner = cols.owner "
+                        "  AND cons.constraint_name = cols.constraint_name "
+                        "WHERE cons.constraint_type = 'P' "
+                        "  AND cons.table_name = :tname "
+                        "  AND cons.owner = :owner"
                     )
-                    cursor.execute(pk_query, tname=tname)
+                    cursor.execute(pk_query, tname=tname, owner=actual_owner)
                     pk_columns = {row[0] for row in cursor.fetchall()}
 
                     # Get foreign key columns with referenced table
                     fk_query = (
                         "SELECT cols.column_name, r_cons.table_name AS ref_table "
-                        "FROM user_constraints cons "
-                        "JOIN user_cons_columns cols "
-                        "  ON cons.constraint_name = cols.constraint_name "
-                        "JOIN user_constraints r_cons "
+                        "FROM all_constraints cons "
+                        "JOIN all_cons_columns cols "
+                        "  ON cons.owner = cols.owner "
+                        "  AND cons.constraint_name = cols.constraint_name "
+                        "JOIN all_constraints r_cons "
                         "  ON cons.r_constraint_name = r_cons.constraint_name "
-                        "WHERE cons.constraint_type = 'R' AND cons.table_name = :tname"
+                        "  AND cons.r_owner = r_cons.owner "
+                        "WHERE cons.constraint_type = 'R' "
+                        "  AND cons.table_name = :tname "
+                        "  AND cons.owner = :owner"
                     )
-                    cursor.execute(fk_query, tname=tname)
+                    cursor.execute(fk_query, tname=tname, owner=actual_owner)
                     fk_map = {row[0]: row[1] for row in cursor.fetchall()}
 
                     columns = []
@@ -177,6 +192,30 @@ class OracleConnector(DatabaseConnector):
             db_type="oracle",
             schema_name=schema or "USER",
         )
+
+    async def get_schemas(self) -> list[str]:
+        if not self._pool:
+            raise RuntimeError("Not connected to Oracle")
+
+        sql = """
+            SELECT username FROM all_users
+            WHERE username NOT IN (
+                'SYS','SYSTEM','OUTLN','DBSNMP','XDB',
+                'CTXSYS','MDSYS','ORDDATA','OLAPSYS','WMSYS','GSMADMIN_INTERNAL',
+                'APPQOSSYS','ANONYMOUS','LBACSYS','ORACLE_OCM','ORDSYS',
+                'SI_INFORMTN_SCHEMA','DVSYS','DBSFWUSER','REMOTE_SCHEDULER_AGENT',
+                'DIP','OJVMSYS','GGSYS','MDDATA','XS$NULL','FLOWS_FILES',
+                'APEX_PUBLIC_USER','APEX_040000','APEX_040200','APEX_050000',
+                'APEX_230100'
+            )
+            AND username NOT LIKE 'APEX%'
+            AND username NOT LIKE 'FLOWS_%'
+            ORDER BY username
+        """
+        df = await self.execute_query(sql)
+        if df.empty:
+            return []
+        return df.iloc[:, 0].tolist()
 
     async def get_server_version(self) -> str:
         if not self._pool:

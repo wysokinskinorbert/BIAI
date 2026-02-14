@@ -46,6 +46,10 @@ class SchemaState(rx.State):
     selected_profile: dict = {}  # ColumnProfile dicts for selected table
     selected_glossary: dict = {}  # TableDescription dict for selected table
 
+    # Schema selector
+    available_schemas: list[str] = []
+    selected_schema: str = ""  # empty = default (public / USER)
+
     # Column data per table (serializable, for select_table event handler)
     table_columns: dict[str, list[dict[str, str]]] = {}
 
@@ -185,6 +189,22 @@ class SchemaState(rx.State):
         return {c.get("name", ""): c for c in cols if c.get("name")}
 
     @rx.var
+    def schema_options(self) -> list[str]:
+        """Schema list with '(Default)' prepended for the selector."""
+        if not self.available_schemas:
+            return []
+        return ["(Default)"] + self.available_schemas
+
+    @rx.var
+    def selected_schema_display(self) -> str:
+        """Display value for schema selector."""
+        return self.selected_schema if self.selected_schema else "(Default)"
+
+    @rx.var
+    def has_schemas(self) -> bool:
+        return len(self.available_schemas) > 0
+
+    @rx.var
     def has_erd(self) -> bool:
         return len(self.erd_nodes) > 0
 
@@ -255,6 +275,55 @@ class SchemaState(rx.State):
         self.erd_edges = edges
 
     @rx.event(background=True)
+    async def refresh_schemas(self):
+        """Fetch available schemas/users from the database."""
+        from biai.state.database import DBState
+        from biai.models.connection import DBType
+
+        try:
+            async with self:
+                db_state = await self.get_state(DBState)
+            async with db_state:
+                if not db_state.is_connected:
+                    return
+                config = db_state._get_config()
+
+            if config.db_type == DBType.ORACLE:
+                from biai.db.oracle import OracleConnector
+                connector = OracleConnector(config)
+            else:
+                from biai.db.postgresql import PostgreSQLConnector
+                connector = PostgreSQLConnector(config)
+
+            await connector.connect()
+            try:
+                schemas = await connector.get_schemas()
+                async with self:
+                    self.available_schemas = schemas
+            finally:
+                await connector.disconnect()
+        except Exception as e:
+            from biai.utils.logger import get_logger
+            get_logger(__name__).warning("refresh_schemas_error", error=str(e))
+
+    def set_schema(self, schema: str):
+        """Set selected schema and trigger refresh."""
+        # "(Default)" maps to empty string = default schema
+        self.selected_schema = "" if schema == "(Default)" else schema
+        # Clear current data
+        self.tables = []
+        self.table_columns = {}
+        self.selected_table = ""
+        self.selected_columns = []
+        self.profiles = {}
+        self.glossary = {}
+        self.selected_profile = {}
+        self.selected_glossary = {}
+        self.erd_nodes = []
+        self.erd_edges = []
+        return SchemaState.refresh_schema
+
+    @rx.event(background=True)
     async def refresh_schema(self):
         from biai.state.database import DBState
         from biai.models.connection import DBType, ConnectionConfig
@@ -262,6 +331,7 @@ class SchemaState(rx.State):
         async with self:
             self.is_loading = True
             self.schema_error = ""
+            current_schema = self.selected_schema
 
         try:
             # Read serialized config from DBState (not _connector which is transient)
@@ -287,7 +357,9 @@ class SchemaState(rx.State):
             try:
                 from biai.db.schema_manager import SchemaManager
                 manager = SchemaManager(connector)
-                snapshot = await manager.get_snapshot(force_refresh=True)
+                snapshot = await manager.get_snapshot(
+                    schema=current_schema, force_refresh=True,
+                )
 
                 tables_flat: list[dict[str, str]] = []
                 tbl_columns: dict[str, list[dict[str, str]]] = {}
@@ -334,6 +406,13 @@ class SchemaState(rx.State):
                 except Exception:
                     pass
 
+                # Also fetch available schemas if not yet loaded
+                schemas_list: list[str] = []
+                try:
+                    schemas_list = await connector.get_schemas()
+                except Exception:
+                    pass
+
                 async with self:
                     self.tables = tables_flat
                     self.table_columns = tbl_columns
@@ -347,6 +426,8 @@ class SchemaState(rx.State):
                         self.profiles = cached_profiles
                     if cached_glossary and not self.glossary:
                         self.glossary = cached_glossary
+                    if schemas_list:
+                        self.available_schemas = schemas_list
                     self._compute_erd()
             finally:
                 await connector.disconnect()

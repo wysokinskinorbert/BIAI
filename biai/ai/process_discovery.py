@@ -77,11 +77,19 @@ class ProcessDiscoveryEngine:
         schema: SchemaSnapshot,
         ollama_host: str = DEFAULT_OLLAMA_HOST,
         ollama_model: str = DEFAULT_MODEL,
+        schema_name: str = "",
     ):
         self._connector = connector
         self._schema = schema
         self._ollama_host = ollama_host
         self._ollama_model = ollama_model
+        self._schema_name = schema_name
+
+    def _qualified_table(self, table_name: str) -> str:
+        """Return schema-qualified table name if schema is set."""
+        if self._schema_name:
+            return f"{self._schema_name}.{table_name}"
+        return table_name
 
     async def discover(self) -> list[DiscoveredProcess]:
         """Run full discovery pipeline and return found processes."""
@@ -320,9 +328,10 @@ class ProcessDiscoveryEngine:
         tp = proc.transition_pattern
         if not tp:
             return
+        qualified = self._qualified_table(tp.table_name)
         sql = (
             f"SELECT {tp.from_column}, {tp.to_column}, COUNT(*) AS cnt "
-            f"FROM {tp.table_name} "
+            f"FROM {qualified} "
             f"WHERE {tp.from_column} IS NOT NULL AND {tp.to_column} IS NOT NULL "
             f"GROUP BY {tp.from_column}, {tp.to_column} "
             f"ORDER BY cnt DESC"
@@ -370,9 +379,10 @@ class ProcessDiscoveryEngine:
         sc = proc.status_column
         if not sc:
             return
+        qualified = self._qualified_table(sc.table_name)
         sql = (
             f"SELECT {sc.column_name}, COUNT(*) AS cnt "
-            f"FROM {sc.table_name} "
+            f"FROM {qualified} "
             f"WHERE {sc.column_name} IS NOT NULL "
             f"GROUP BY {sc.column_name} "
             f"ORDER BY cnt DESC"

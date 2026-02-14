@@ -72,11 +72,20 @@ class ProcessMapState(rx.State):
                 ollama_host = model_state.ollama_host
                 ollama_model = model_state.selected_model
 
+            # Get selected schema from SchemaState
+            from biai.state.schema import SchemaState
+
+            async with self:
+                schema_state = await self.get_state(SchemaState)
+            selected_schema = ""
+            async with schema_state:
+                selected_schema = schema_state.selected_schema
+
             # Build schema snapshot
             from biai.db.schema_manager import SchemaManager
 
             schema_mgr = SchemaManager(connector)
-            schema = await schema_mgr.get_snapshot()
+            schema = await schema_mgr.get_snapshot(schema=selected_schema)
 
             # Run discovery
             from biai.ai.process_discovery import ProcessDiscoveryEngine
@@ -85,6 +94,7 @@ class ProcessMapState(rx.State):
                 connector, schema,
                 ollama_host=ollama_host,
                 ollama_model=ollama_model,
+                schema_name=schema.schema_name if schema.schema_name != "USER" else "",
             )
             discovered = await engine.discover()
 

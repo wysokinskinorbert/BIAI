@@ -144,6 +144,7 @@ class AIPipeline:
                         self._connector, snapshot,
                         ollama_host=self._ollama_host,
                         ollama_model=self._ollama_model,
+                        schema_name=snapshot.schema_name if snapshot.schema_name != "USER" else "",
                     )
                     discovered = await engine.discover()
                     _discovery_cache.store(self._connector.config, discovered)

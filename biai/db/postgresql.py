@@ -154,6 +154,20 @@ class PostgreSQLConnector(DatabaseConnector):
             schema_name=schema,
         )
 
+    async def get_schemas(self) -> list[str]:
+        if not self._pool:
+            raise RuntimeError("Not connected to PostgreSQL")
+
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT schema_name FROM information_schema.schemata
+                WHERE schema_name NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+                AND schema_name NOT LIKE 'pg_temp_%'
+                AND schema_name NOT LIKE 'pg_toast_temp_%'
+                ORDER BY schema_name
+            """)
+            return [row["schema_name"] for row in rows]
+
     async def get_server_version(self) -> str:
         if not self._pool:
             return "Not connected"
