@@ -8,7 +8,7 @@ from typing import AsyncIterator
 
 import httpx
 
-from biai.config.constants import DEFAULT_MODEL, DEFAULT_OLLAMA_HOST
+from biai.config.constants import DEFAULT_MODEL, DEFAULT_OLLAMA_HOST, LLM_OPTIONS
 from biai.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -76,6 +76,7 @@ class LLMHelper:
             "model": self._model,
             "prompt": prompt,
             "stream": False,
+            "options": LLM_OPTIONS,
         }
         if system:
             payload["system"] = system
@@ -105,6 +106,7 @@ class LLMHelper:
             "model": self._model,
             "prompt": prompt,
             "stream": True,
+            "options": LLM_OPTIONS,
         }
         if system:
             payload["system"] = system

@@ -90,9 +90,9 @@ class SelfCorrectionLoop:
                 logger.warning("sql_validation_failed", attempt=attempt, error=query.validation_error)
                 continue
 
-            # Try execution if executor provided
+            # Try execution if executor provided (use validated/transpiled SQL)
             if db_executor:
-                result = await db_executor.execute(sql)
+                result = await db_executor.execute(query.sql)
                 if isinstance(result, QueryError):
                     error_msg = f"Attempt {attempt}: {result.error_message}"
                     errors.append(error_msg)

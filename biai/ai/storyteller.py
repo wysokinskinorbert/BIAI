@@ -7,6 +7,7 @@ import httpx
 import pandas as pd
 
 from biai.ai.prompt_templates import STORYTELLING_PROMPT
+from biai.config.constants import LLM_OPTIONS
 from biai.models.insight import Insight
 from biai.models.story import DataStory, StoryNarrativeType
 from biai.utils.logger import get_logger
@@ -87,7 +88,7 @@ class DataStoryteller:
                     "model": self._model,
                     "prompt": prompt,
                     "stream": False,
-                    "options": {"temperature": 0.7, "num_predict": 500},
+                    "options": {**LLM_OPTIONS, "num_predict": 500},
                 },
             )
             resp.raise_for_status()

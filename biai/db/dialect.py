@@ -42,6 +42,11 @@ class DialectHelper:
         "Use ARRAY_AGG() and STRING_AGG() for aggregation.",
         "Use DISTINCT ON (column) for distinct per group.",
         "Use GENERATE_SERIES() for sequence generation.",
+        "NEVER use strftime() — it is a SQLite function and does NOT exist in PostgreSQL. "
+        "Use TO_CHAR(date_col, 'YYYY-MM') for date formatting, "
+        "DATE_TRUNC('month', date_col) for grouping by month, "
+        "EXTRACT(YEAR FROM date_col) for extracting year.",
+        "Do NOT include SQL comments (-- or /* */) in generated queries.",
     ]
 
     @classmethod

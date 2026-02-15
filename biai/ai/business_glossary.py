@@ -9,7 +9,7 @@ import httpx
 from biai.models.schema import SchemaSnapshot
 from biai.models.glossary import BusinessGlossary, TableDescription, ColumnDescription
 from biai.models.profile import TableProfile
-from biai.config.constants import DEFAULT_MODEL, DEFAULT_OLLAMA_HOST
+from biai.config.constants import DEFAULT_MODEL, DEFAULT_OLLAMA_HOST, LLM_OPTIONS
 from biai.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -123,7 +123,7 @@ class BusinessGlossaryGenerator:
                     "model": self._ollama_model,
                     "prompt": prompt,
                     "stream": False,
-                    "options": {"temperature": 0.3},
+                    "options": LLM_OPTIONS,
                 },
                 timeout=120.0,
             )
