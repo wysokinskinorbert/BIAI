@@ -5,7 +5,7 @@ from pathlib import Path
 from vanna.chromadb import ChromaDB_VectorStore
 from vanna.ollama import Ollama
 
-from biai.config.constants import DEFAULT_MODEL, DEFAULT_OLLAMA_HOST, DEFAULT_CHROMA_COLLECTION
+from biai.config.constants import DEFAULT_MODEL, DEFAULT_OLLAMA_HOST, DEFAULT_CHROMA_COLLECTION, LLM_OPTIONS
 from biai.utils.logger import get_logger
 
 # Store ChromaDB data outside project dir to avoid Reflex hot-reload triggers
@@ -27,6 +27,13 @@ class MyVanna(ChromaDB_VectorStore, Ollama):
             model=config.get("model", "unknown"),
             ollama_host=config.get("ollama_host", "unknown"),
         )
+
+    def get_sql_prompt(self, initial_prompt, question, question_sql_list, ddl_list, doc_list):
+        """Override to sort RAG lists for deterministic prompt assembly."""
+        question_sql_list = sorted(question_sql_list, key=lambda x: x.get("question", ""))
+        ddl_list = sorted(ddl_list)
+        doc_list = sorted(doc_list)
+        return super().get_sql_prompt(initial_prompt, question, question_sql_list, ddl_list, doc_list)
 
     def reset_collections(self):
         """Delete and recreate all ChromaDB collections (fixes corrupted HNSW indices)."""
@@ -64,6 +71,7 @@ def create_vanna_client(
         "model": model,
         "ollama_host": ollama_host,
         "dialect": dialect,
+        "options": LLM_OPTIONS,
     }
 
     if chroma_host:

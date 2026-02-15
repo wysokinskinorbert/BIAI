@@ -36,6 +36,19 @@ def _strip_latex(text: str) -> str:
     return text
 
 
+def _strip_sql_blocks(text: str) -> str:
+    """Strip SQL code blocks and chain-of-thought reasoning from LLM description output."""
+    # Remove fenced code blocks (```sql ... ``` or ``` ... ```)
+    text = re.sub(r"```(?:sql|SQL)?.*?```", "", text, flags=re.DOTALL)
+    # Remove standalone SQL statements that leaked into description
+    text = re.sub(
+        r"(?m)^\s*(SELECT|WITH)\s+.+?;\s*$", "", text, flags=re.IGNORECASE | re.DOTALL
+    )
+    # Clean up excessive whitespace left after removal
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
 def _make_message(**kwargs) -> dict:
     """Create a validated message dict via ChatMessage model."""
     return ChatMessage(**kwargs).model_dump()
@@ -540,7 +553,7 @@ class ChatState(rx.State):
                     description_parts.append(token)
                     async with self:
                         self._update_last_message(
-                            content=_strip_latex("".join(description_parts)),
+                            content=_strip_sql_blocks(_strip_latex("".join(description_parts))),
                             sql=result.sql_query.sql,
                             has_chart=result.chart_config is not None,
                             has_table=True,
@@ -551,7 +564,7 @@ class ChatState(rx.State):
 
                 async with self:
                     self._update_last_message(
-                        content=_strip_latex("".join(description_parts)),
+                        content=_strip_sql_blocks(_strip_latex("".join(description_parts))),
                         sql=result.sql_query.sql,
                         has_chart=result.chart_config is not None,
                         has_table=True,

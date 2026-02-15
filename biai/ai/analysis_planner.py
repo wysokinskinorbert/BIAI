@@ -7,7 +7,7 @@ import httpx
 from biai.ai.prompt_templates import ANALYSIS_PLAN_PROMPT
 from biai.models.analysis import AnalysisPlan, AnalysisStep, StepType
 from biai.models.schema import SchemaSnapshot
-from biai.config.constants import DEFAULT_MODEL, DEFAULT_OLLAMA_HOST
+from biai.config.constants import DEFAULT_MODEL, DEFAULT_OLLAMA_HOST, LLM_OPTIONS
 from biai.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -99,7 +99,7 @@ class AnalysisPlanner:
                     "model": self._ollama_model,
                     "prompt": prompt,
                     "stream": False,
-                    "options": {"temperature": 0.2},
+                    "options": LLM_OPTIONS,
                 },
                 timeout=60.0,
             )

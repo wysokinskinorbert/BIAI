@@ -27,6 +27,7 @@ from biai.config.constants import (
     DISCOVERY_QUERY_TIMEOUT,
     DEFAULT_OLLAMA_HOST,
     DEFAULT_MODEL,
+    LLM_OPTIONS,
 )
 from biai.db.base import DatabaseConnector
 from biai.models.discovery import (
@@ -744,6 +745,7 @@ class ProcessDiscoveryEngine:
                         "prompt": prompt,
                         "stream": False,
                         "format": "json",
+                        "options": LLM_OPTIONS,
                     },
                     timeout=30.0,
                 )

@@ -1,6 +1,7 @@
 """AI Pipeline - orchestrator for the full question-to-answer flow."""
 
 import json
+import re
 from typing import AsyncIterator
 
 import httpx
@@ -21,7 +22,7 @@ from biai.ai.process_training_dynamic import DynamicProcessTrainer
 # Module-level singleton: shared across pipeline instances (survives pipeline GC)
 _discovery_cache = ProcessDiscoveryCache()
 from biai.ai.prompt_templates import DESCRIPTION_PROMPT, SYSTEM_PROMPT, format_dialect_rules
-from biai.config.constants import DEFAULT_MODEL, DEFAULT_OLLAMA_HOST, DEFAULT_CHROMA_COLLECTION, USE_DYNAMIC_DISCOVERY
+from biai.config.constants import DEFAULT_MODEL, DEFAULT_OLLAMA_HOST, DEFAULT_CHROMA_COLLECTION, USE_DYNAMIC_DISCOVERY, LLM_OPTIONS
 from biai.db.base import DatabaseConnector
 from biai.db.dialect import DialectHelper, get_categorical_columns, build_distinct_values_docs
 from biai.db.schema_manager import SchemaManager
@@ -652,7 +653,11 @@ class AIPipeline:
         sql: str,
         df: pd.DataFrame,
     ) -> AsyncIterator[str]:
-        """Stream a text description of query results."""
+        """Stream a text description of query results.
+
+        Includes guardrails to prevent SQL-specialized models from
+        generating SQL code instead of business descriptions.
+        """
         key_points = _extract_key_points(df)
 
         prompt = DESCRIPTION_PROMPT.format(
@@ -664,6 +669,7 @@ class AIPipeline:
         )
 
         try:
+            tokens: list[str] = []
             async with httpx.AsyncClient() as client:
                 async with client.stream(
                     "POST",
@@ -672,6 +678,7 @@ class AIPipeline:
                         "model": self._ollama_model,
                         "prompt": prompt,
                         "stream": True,
+                        "options": {**LLM_OPTIONS, "num_predict": 500},
                     },
                     timeout=60.0,
                 ) as resp:
@@ -682,6 +689,8 @@ class AIPipeline:
                         try:
                             data = json.loads(line)
                             if token := data.get("response", ""):
+                                tokens.append(token)
+                                # Yield cleaned token for streaming
                                 yield token
                             if data.get("done", False):
                                 break

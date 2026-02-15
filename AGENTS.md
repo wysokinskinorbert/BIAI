@@ -46,3 +46,19 @@ Never commit secrets. Use `.env` (loaded via `pydantic-settings`) for local conf
 Use read-only DB users where possible.  
 Treat generated SQL as read-only; do not weaken validator safeguards in `biai/ai/sql_validator.py`.
 
+## Agent-Specific UI Test Routing
+When user intent is browser/UI testing, use the global skill `ui-web-testing` and run MCP browser tools automatically.
+
+Trigger phrases (case-insensitive, including close variants/typos):
+- `testu UI`
+- `przetestuj w przeglądarce`
+- `test w UI`
+- `test UI`
+- `UI test`
+- `browser test`
+
+Execution policy:
+- Default tool: `playwright` MCP for deterministic end-to-end flows.
+- Use `chrome-devtools` MCP for deep diagnosis (DOM/CSS, console, network, performance) or visual-debug confirmation.
+- Prefer hybrid loop for hard bugs: reproduce in Playwright, inspect in DevTools, verify in Playwright.
+- Optimize token usage with snapshot-first evidence, minimal screenshots, and compact pass/fail reporting.

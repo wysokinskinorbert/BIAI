@@ -22,6 +22,13 @@ class SQLValidator:
         """Validate a SQL query. Returns SQLQuery with is_valid flag."""
         sql = sql.strip().rstrip(";").strip()
 
+        # Strip SQL comments (AI models often generate -- or /* */ comments)
+        sql = self._strip_comments(sql)
+
+        # Rewrite SQLite-specific functions for PostgreSQL
+        if self._dialect == "postgres":
+            sql = self._rewrite_sqlite_functions(sql)
+
         # Sanitize Oracle bind variable placeholders before validation
         if self._dialect == "oracle":
             sql = self._sanitize_bind_variables(sql)
@@ -129,6 +136,91 @@ class SQLValidator:
             transpiled = sql
 
         return None, transpiled
+
+    def _strip_comments(self, sql: str) -> str:
+        """Strip SQL comments from AI-generated queries.
+
+        AI models (especially Arctic-Text2SQL) often include -- line comments
+        and /* block comments */ which trigger our injection-prevention patterns.
+        Stripping them is safe because the SQL comes from the AI, not user input.
+        """
+        # Remove block comments first (/* ... */), including multiline
+        sql = re.sub(r"/\*.*?\*/", " ", sql, flags=re.DOTALL)
+        # Remove line comments (-- to end of line)
+        sql = re.sub(r"--[^\n]*", "", sql)
+        # Clean up extra whitespace
+        sql = re.sub(r"\s+", " ", sql).strip()
+        return sql
+
+    def _rewrite_sqlite_functions(self, sql: str) -> str:
+        """Rewrite SQLite-specific functions to PostgreSQL equivalents.
+
+        Arctic-Text2SQL-R1 was fine-tuned on Spider/BIRD (SQLite) and
+        generates strftime()/date() which don't exist in PostgreSQL.
+        """
+        # strftime('%Y-%m', col) → TO_CHAR(col, 'YYYY-MM')
+        # strftime('%Y', col) → TO_CHAR(col, 'YYYY')
+        # strftime('%m', col) → TO_CHAR(col, 'MM')
+        _FMT_MAP = {
+            "'%Y-%m'": "'YYYY-MM'",
+            "'%Y'": "'YYYY'",
+            "'%m'": "'MM'",
+            "'%d'": "'DD'",
+            "'%Y-%m-%d'": "'YYYY-MM-DD'",
+            "'%H:%M'": "'HH24:MI'",
+        }
+        for sqlite_fmt, pg_fmt in _FMT_MAP.items():
+            pattern = rf"strftime\(\s*{re.escape(sqlite_fmt)}\s*,\s*(.+?)\)"
+            replacement = rf"TO_CHAR(\1, {pg_fmt})"
+            sql = re.sub(pattern, replacement, sql, flags=re.IGNORECASE)
+
+        # Catch remaining strftime() calls with unknown formats
+        sql = re.sub(
+            r"strftime\(\s*'([^']*)'\s*,\s*(.+?)\)",
+            lambda m: f"TO_CHAR({m.group(2)}, '{m.group(1)}')",
+            sql,
+            flags=re.IGNORECASE,
+        )
+
+        # SQLite DATE() with modifiers → PostgreSQL date arithmetic
+        # DATE('now', '-1 year') → CURRENT_DATE - INTERVAL '1 year'
+        # DATE('now', '+3 month') → CURRENT_DATE + INTERVAL '3 month'
+        # DATE('now', 'start of month') → DATE_TRUNC('month', CURRENT_DATE)
+        sql = re.sub(
+            r"\bdate\(\s*'now'\s*,\s*'([+-]?)(\d+)\s+(year|month|day)s?'\s*\)",
+            lambda m: (
+                f"CURRENT_DATE {'-' if m.group(1) == '-' else '+'} "
+                f"INTERVAL '{m.group(2)} {m.group(3)}'"
+            ),
+            sql,
+            flags=re.IGNORECASE,
+        )
+
+        # DATE('now', 'start of month') → DATE_TRUNC('month', CURRENT_DATE)
+        sql = re.sub(
+            r"\bdate\(\s*'now'\s*,\s*'start of (year|month|day)'\s*\)",
+            r"DATE_TRUNC('\1', CURRENT_DATE)",
+            sql,
+            flags=re.IGNORECASE,
+        )
+
+        # DATE('now') → CURRENT_DATE
+        sql = re.sub(
+            r"\bdate\(\s*'now'\s*\)",
+            "CURRENT_DATE",
+            sql,
+            flags=re.IGNORECASE,
+        )
+
+        # date(col) → col::date (PostgreSQL cast) — single column/expression arg
+        sql = re.sub(
+            r"\bdate\(\s*([^()]+?)\s*\)",
+            r"(\1)::date",
+            sql,
+            flags=re.IGNORECASE,
+        )
+
+        return sql
 
     def _sanitize_bind_variables(self, sql: str) -> str:
         """Replace Oracle bind variable placeholders with string literals.
