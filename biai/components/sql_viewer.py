@@ -9,28 +9,41 @@ def sql_viewer() -> rx.Component:
     """SQL viewer with syntax highlighting, collapsed by default."""
     return rx.card(
         rx.vstack(
-            # Header (always visible, clickable to toggle)
+            # Header (always visible)
             rx.hstack(
-                rx.icon("code", size=16, color="var(--accent-9)"),
-                rx.text("Generated SQL", size="3", weight="medium"),
-                rx.spacer(),
-                rx.cond(
-                    QueryState.generation_attempts > 1,
-                    rx.tooltip(
-                        rx.badge(
-                            f"Attempt {QueryState.generation_attempts}",
-                            variant="soft",
-                            size="1",
-                            color_scheme="orange",
+                # Clickable toggle area (expands to fill)
+                rx.hstack(
+                    rx.icon("code", size=16, color="var(--accent-9)"),
+                    rx.text("Generated SQL", size="3", weight="medium"),
+                    rx.spacer(),
+                    rx.cond(
+                        QueryState.generation_attempts > 1,
+                        rx.tooltip(
+                            rx.badge(
+                                f"Attempt {QueryState.generation_attempts}",
+                                variant="soft",
+                                size="1",
+                                color_scheme="orange",
+                            ),
+                            content="AI needed multiple attempts to generate valid SQL",
                         ),
-                        content="AI needed multiple attempts to generate valid SQL",
                     ),
+                    rx.badge(
+                        QueryState.sql_dialect,
+                        variant="soft",
+                        size="1",
+                    ),
+                    rx.cond(
+                        QueryState.sql_expanded,
+                        rx.icon("chevron-up", size=14, color="var(--gray-9)"),
+                        rx.icon("chevron-down", size=14, color="var(--gray-9)"),
+                    ),
+                    flex="1",
+                    align="center",
+                    cursor="pointer",
+                    on_click=QueryState.toggle_sql_expanded,
                 ),
-                rx.badge(
-                    QueryState.sql_dialect,
-                    variant="soft",
-                    size="1",
-                ),
+                # Copy button (outside toggle area to avoid event propagation)
                 rx.tooltip(
                     rx.icon_button(
                         rx.icon("copy", size=14),
@@ -41,20 +54,8 @@ def sql_viewer() -> rx.Component:
                     ),
                     content="Copy SQL",
                 ),
-                rx.icon_button(
-                    rx.cond(
-                        QueryState.sql_expanded,
-                        rx.icon("chevron-up", size=14),
-                        rx.icon("chevron-down", size=14),
-                    ),
-                    variant="ghost",
-                    size="1",
-                    on_click=QueryState.toggle_sql_expanded,
-                ),
                 width="100%",
                 align="center",
-                cursor="pointer",
-                on_click=QueryState.toggle_sql_expanded,
             ),
 
             # SQL code block (collapsible)

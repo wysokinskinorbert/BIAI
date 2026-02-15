@@ -34,6 +34,12 @@ class ProcessState(rx.State):
     prev_process_name: str = ""
     show_comparison: bool = False
 
+    # Sankey + Timeline ECharts options (from EventLog)
+    sankey_option: dict = {}
+    show_sankey: bool = False
+    timeline_option: dict = {}
+    show_timeline: bool = False
+
     # Version counter (force React re-render like ChartState)
     process_version: int = 0
 
@@ -81,6 +87,16 @@ class ProcessState(rx.State):
         self.show_comparison = False
         self.process_version += 1
 
+    def set_sankey_timeline(self, sankey: dict, timeline: dict):
+        """Set Sankey and Timeline ECharts options from EventLog data."""
+        if sankey:
+            self.sankey_option = sankey
+            self.show_sankey = True
+        if timeline:
+            self.timeline_option = timeline
+            self.show_timeline = True
+        self.process_version += 1
+
     def clear_process(self):
         # Save current to prev before clearing (for comparison)
         if self.flow_nodes:
@@ -99,6 +115,10 @@ class ProcessState(rx.State):
         self.selected_node_data = {}
         self.show_animation = False
         self.show_comparison = False
+        self.sankey_option = {}
+        self.show_sankey = False
+        self.timeline_option = {}
+        self.show_timeline = False
         self.process_version += 1
 
     def toggle_animation(self):

@@ -1,9 +1,11 @@
 """Auto-profiling engine for database tables and columns."""
 
+import asyncio
 import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 import pandas as pd
 
@@ -164,11 +166,14 @@ class DataProfiler:
             if len(numeric) > 1:
                 stats.std = round(float(numeric.std()), 2)
         else:
-            # String min/max
-            str_vals = non_null.astype(str)
-            if len(str_vals) > 0:
-                stats.min_value = str(str_vals.min())
-                stats.max_value = str(str_vals.max())
+            # String min/max (guard against mixed types)
+            try:
+                str_vals = non_null.astype(str)
+                if len(str_vals) > 0:
+                    stats.min_value = str(str_vals.min())
+                    stats.max_value = str(str_vals.max())
+            except TypeError:
+                pass
 
         # Top values (value counts)
         if len(non_null) > 0:
@@ -223,6 +228,66 @@ class DataProfiler:
             return SemanticType.CATEGORY
 
         return SemanticType.TEXT if non_null.dtype == object else SemanticType.UNKNOWN
+
+    # --- Batch profiling ---
+
+    async def profile_tables_batch(
+        self,
+        tables: list[TableInfo],
+        concurrency: int = 10,
+        on_progress: Callable[[int, int], None] | None = None,
+        timeout: float = 60.0,
+    ) -> dict[str, TableProfile]:
+        """Profile multiple tables in parallel with controlled concurrency.
+
+        Args:
+            tables: Tables to profile.
+            concurrency: Max concurrent profiling tasks.
+            on_progress: Callback(completed, total) for progress updates.
+            timeout: Max total time in seconds.
+
+        Returns:
+            Dict of table_name -> TableProfile.
+        """
+        sem = asyncio.Semaphore(concurrency)
+        results: dict[str, TableProfile] = {}
+        completed = 0
+        total = len(tables)
+
+        async def _profile_one(table: TableInfo) -> None:
+            nonlocal completed
+            async with sem:
+                try:
+                    profile = await self.profile_table(table)
+                    results[table.name] = profile
+                except Exception as e:
+                    logger.warning(
+                        "batch_profile_failed",
+                        table=table.name, error=str(e),
+                    )
+                finally:
+                    completed += 1
+                    if on_progress:
+                        on_progress(completed, total)
+
+        tasks = [_profile_one(t) for t in tables]
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "batch_profile_timeout",
+                completed=completed, total=total,
+                timeout=timeout,
+            )
+
+        logger.info(
+            "batch_profile_complete",
+            profiled=len(results), total=total,
+        )
+        return results
 
     # --- Disk caching ---
 

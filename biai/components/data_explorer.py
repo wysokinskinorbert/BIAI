@@ -117,10 +117,37 @@ def data_explorer() -> rx.Component:
             display=rx.cond(SchemaState.schema_error != "", "flex", "none"),
         ),
 
+        # Discovery progress
+        rx.cond(
+            SchemaState.discovery_step != "",
+            rx.hstack(
+                rx.spinner(size="1"),
+                rx.text(SchemaState.discovery_step, size="1", color="var(--accent-11)"),
+                spacing="2",
+                align="center",
+                width="100%",
+            ),
+        ),
+
         # Status badges
         rx.cond(
-            DBState.is_connected & (SchemaState.has_profiles | SchemaState.has_glossary),
+            DBState.is_connected & (
+                SchemaState.has_profiles | SchemaState.has_glossary | SchemaState.has_graph_analysis
+            ),
             rx.hstack(
+                rx.cond(
+                    SchemaState.has_graph_analysis,
+                    rx.tooltip(
+                        rx.badge(
+                            rx.icon("git-fork", size=10),
+                            "Graph",
+                            variant="surface",
+                            size="1",
+                            color_scheme="purple",
+                        ),
+                        content=SchemaState.graph_summary,
+                    ),
+                ),
                 rx.cond(
                     SchemaState.has_profiles,
                     rx.badge(

@@ -121,3 +121,46 @@ class TestSQLValidator:
     def test_strips_whitespace(self, validator):
         result = validator.validate("  SELECT 1  ")
         assert result.is_valid
+
+    # UNION / INTERSECT / EXCEPT (set operations)
+    def test_valid_union_all(self, validator):
+        result = validator.validate(
+            "SELECT status, COUNT(*) FROM orders GROUP BY status "
+            "UNION ALL "
+            "SELECT status, COUNT(*) FROM shipments GROUP BY status"
+        )
+        assert result.is_valid
+        assert result.validation_error is None
+
+    def test_valid_union(self, validator):
+        result = validator.validate(
+            "SELECT name FROM customers "
+            "UNION "
+            "SELECT name FROM suppliers"
+        )
+        assert result.is_valid
+
+    def test_valid_intersect(self, validator):
+        result = validator.validate(
+            "SELECT customer_id FROM orders "
+            "INTERSECT "
+            "SELECT customer_id FROM returns"
+        )
+        assert result.is_valid
+
+    def test_valid_except(self, validator):
+        result = validator.validate(
+            "SELECT customer_id FROM orders "
+            "EXCEPT "
+            "SELECT customer_id FROM blacklist"
+        )
+        assert result.is_valid
+
+    def test_union_with_insert_blocked(self, validator):
+        """UNION with INSERT in one branch should be blocked."""
+        result = validator.validate(
+            "SELECT * FROM customers "
+            "UNION ALL "
+            "INSERT INTO customers (name) VALUES ('hacker')"
+        )
+        assert not result.is_valid

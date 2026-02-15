@@ -58,10 +58,26 @@ class DialectHelper:
         return _generate_examples_from_schema(schema, db_type)
 
     @classmethod
-    def get_documentation(cls, schema: SchemaSnapshot) -> list[str]:
-        """Generate natural-language documentation from schema."""
+    def get_documentation(
+        cls,
+        schema: SchemaSnapshot,
+        detail_level: str = "full",
+        relevant_tables: list[str] | None = None,
+    ) -> list[str]:
+        """Generate natural-language documentation from schema.
+
+        Args:
+            detail_level: "overview" (tables only, no columns ~50KB for 2000 tables),
+                          "relevant" (full DDL only for relevant_tables ~20KB),
+                          "full" (all tables with full DDL, default).
+            relevant_tables: Table names to include in "relevant" mode.
+        """
         if not schema or not schema.tables:
             return []
+        if detail_level == "overview":
+            return _generate_overview_docs(schema)
+        if detail_level == "relevant" and relevant_tables:
+            return _generate_relevant_docs(schema, relevant_tables)
         return _generate_docs_from_schema(schema)
 
     @classmethod
@@ -139,6 +155,82 @@ def _generate_docs_from_schema(schema: SchemaSnapshot) -> list[str]:
 
     # Column disambiguation — prevent AI from using wrong column names across tables
     docs.extend(_generate_column_disambiguation(schema))
+
+    return docs
+
+
+def _generate_overview_docs(schema: SchemaSnapshot) -> list[str]:
+    """Overview-only docs: table names + row counts, no column details.
+
+    Suitable for large schemas (2000+ tables) where full DDL would
+    exceed LLM context window. ~50KB for 2000 tables.
+    """
+    docs = []
+    schema_prefix = ""
+    if schema.schema_name and schema.schema_name not in ("", "public", "USER"):
+        schema_prefix = f"{schema.schema_name}."
+        docs.append(
+            f"All tables belong to schema {schema.schema_name}. "
+            f"Use {schema.schema_name}.TABLE_NAME in queries."
+        )
+
+    table_refs = [f"{schema_prefix}{t.name}" for t in schema.tables]
+    docs.append(
+        f"The database contains {len(table_refs)} tables: {', '.join(table_refs)}."
+    )
+
+    # FK summary (compact, no column details)
+    relationships = []
+    for table in schema.tables:
+        tbl_ref = f"{schema_prefix}{table.name}"
+        for col in table.columns:
+            if col.is_foreign_key and col.foreign_key_ref:
+                relationships.append(f"{tbl_ref} -> {col.foreign_key_ref}")
+    if relationships:
+        docs.append(f"Relationships: {'; '.join(relationships[:100])}.")
+
+    return docs
+
+
+def _generate_relevant_docs(
+    schema: SchemaSnapshot,
+    relevant_tables: list[str],
+) -> list[str]:
+    """Full DDL only for relevant tables, overview for the rest.
+
+    Provides detailed column info for candidate process tables while
+    keeping the total context manageable (~20KB).
+    """
+    relevant_upper = {t.upper() for t in relevant_tables}
+    docs = _generate_overview_docs(schema)
+
+    schema_prefix = ""
+    if schema.schema_name and schema.schema_name not in ("", "public", "USER"):
+        schema_prefix = f"{schema.schema_name}."
+
+    # Full DDL for relevant tables only
+    for table in schema.tables:
+        if table.name.upper() not in relevant_upper:
+            continue
+        col_descriptions = []
+        pk_cols = []
+        fk_descriptions = []
+        tbl_ref = f"{schema_prefix}{table.name}"
+
+        for col in table.columns:
+            desc = f"{col.name} ({col.data_type})"
+            if col.is_primary_key:
+                pk_cols.append(col.name)
+            if col.is_foreign_key and col.foreign_key_ref:
+                fk_descriptions.append(f"{col.name} references {col.foreign_key_ref}")
+            col_descriptions.append(desc)
+
+        parts = [f"Table {tbl_ref} has columns: {', '.join(col_descriptions)}."]
+        if pk_cols:
+            parts.append(f"Primary key: {', '.join(pk_cols)}.")
+        if fk_descriptions:
+            parts.append(f"Foreign keys: {'; '.join(fk_descriptions)}.")
+        docs.append(" ".join(parts))
 
     return docs
 
@@ -399,6 +491,7 @@ def build_distinct_values_docs(distinct_map: dict[str, dict[str, list[str]]]) ->
             vals_str = ", ".join(f"'{v}'" for v in values)
             docs.append(
                 f"IMPORTANT: The column {table}.{col} contains these exact values (case-sensitive): "
-                f"{vals_str}. Always use these exact values in WHERE clauses."
+                f"{vals_str}. Always use these exact values in WHERE clauses. "
+                f"For count/distribution queries, use GROUP BY {col} — do NOT use CASE WHEN."
             )
     return docs

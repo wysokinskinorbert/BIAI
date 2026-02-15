@@ -3,6 +3,18 @@
 from pydantic import BaseModel, Field
 
 
+class Evidence(BaseModel):
+    """A single piece of evidence supporting a process discovery."""
+
+    signal_type: str  # "status_column", "transition_table", "fk_chain",
+    # "timestamp_sequence", "trigger_on_status", "hub_table",
+    # "star_schema_fact", "bridge_table"
+    description: str
+    strength: float = 0.0  # 0.0 - 1.0
+    source_table: str = ""
+    source_column: str = ""
+
+
 class ColumnCandidate(BaseModel):
     """A column that may represent a process status or timestamp."""
 
@@ -50,6 +62,9 @@ class DiscoveredProcess(BaseModel):
     stages: list[str] = Field(default_factory=list)
     stage_counts: dict[str, int] = Field(default_factory=dict)
     branches: dict[str, list[str]] = Field(default_factory=dict)
+
+    # Evidence supporting this process
+    evidence: list[Evidence] = Field(default_factory=list)
 
     # Overall quality score (0.0 - 1.0)
     confidence: float = 0.0

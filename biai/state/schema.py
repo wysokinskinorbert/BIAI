@@ -53,6 +53,22 @@ class SchemaState(rx.State):
     # Column data per table (serializable, for select_table event handler)
     table_columns: dict[str, list[dict[str, str]]] = {}
 
+    # --- Graph analysis data ---
+    graph_hub_tables: list[dict[str, str]] = []  # [{name, degree}]
+    graph_components: int = 0
+    graph_communities: int = 0
+    graph_star_schemas: list[dict[str, str]] = []  # [{fact_table, fk_count}]
+    graph_bridge_tables: list[str] = []
+    graph_cross_schema_edges: int = 0
+
+    # Schema graph visualization (ECharts force-directed)
+    schema_graph_option: dict = {}
+    show_schema_graph: bool = False
+
+    # Discovery progress
+    discovery_step: str = ""  # Current discovery step name
+    discovery_duration_ms: int = 0
+
     def set_search_query(self, value: str):
         self.search_query = value
 
@@ -210,6 +226,28 @@ class SchemaState(rx.State):
         return len(self.available_schemas) > 0
 
     @rx.var
+    def graph_hub_count(self) -> int:
+        return len(self.graph_hub_tables)
+
+    @rx.var
+    def has_graph_analysis(self) -> bool:
+        return self.graph_components > 0 or len(self.graph_hub_tables) > 0
+
+    @rx.var
+    def graph_summary(self) -> str:
+        """One-line summary of graph analysis."""
+        parts = []
+        if self.graph_components > 0:
+            parts.append(f"{self.graph_components} domains")
+        if self.graph_hub_tables:
+            parts.append(f"{len(self.graph_hub_tables)} hubs")
+        if self.graph_star_schemas:
+            parts.append(f"{len(self.graph_star_schemas)} star schemas")
+        if self.graph_cross_schema_edges > 0:
+            parts.append(f"{self.graph_cross_schema_edges} cross-schema FKs")
+        return ", ".join(parts) if parts else ""
+
+    @rx.var
     def has_erd(self) -> bool:
         return len(self.erd_nodes) > 0
 
@@ -231,7 +269,8 @@ class SchemaState(rx.State):
         """Build ERD nodes and edges from table_columns data."""
         nodes: list[dict[str, Any]] = []
         edges: list[dict[str, Any]] = []
-        table_names = set(self.table_columns.keys())
+        # Case-insensitive lookup: normalize to upper for matching
+        table_names_upper = {name.upper(): name for name in self.table_columns.keys()}
 
         for idx, table_name in enumerate(sorted(self.table_columns.keys())):
             cols = self.table_columns[table_name]
@@ -248,14 +287,17 @@ class SchemaState(rx.State):
                     "isFk": c.get("is_fk", "") == "1",
                 })
 
-                # Create edge for FK relationships
+                # Create edge for FK relationships (case-insensitive match)
                 fk_ref = c.get("fk_ref", "")
-                if fk_ref and fk_ref in table_names:
-                    edge_id = f"e-{table_name}-{c['name']}-{fk_ref}"
+                # Strip schema prefix if present (e.g. "SCHEMA.TABLE" -> "TABLE")
+                fk_ref_table = fk_ref.split(".")[-1] if fk_ref else ""
+                resolved_ref = table_names_upper.get(fk_ref_table.upper(), "") if fk_ref_table else ""
+                if resolved_ref:
+                    edge_id = f"e-{table_name}-{c['name']}-{resolved_ref}"
                     edges.append({
                         "id": edge_id,
                         "source": table_name,
-                        "target": fk_ref,
+                        "target": resolved_ref,
                         "type": "smoothstep",
                         "animated": True,
                         "label": c["name"],
@@ -326,6 +368,16 @@ class SchemaState(rx.State):
         self.selected_glossary = {}
         self.erd_nodes = []
         self.erd_edges = []
+        # Clear graph analysis
+        self.graph_hub_tables = []
+        self.graph_components = 0
+        self.graph_communities = 0
+        self.graph_star_schemas = []
+        self.graph_bridge_tables = []
+        self.graph_cross_schema_edges = 0
+        self.schema_graph_option = {}
+        self.show_schema_graph = False
+        self.discovery_step = ""
         return SchemaState.refresh_schema
 
     @rx.event(background=True)
@@ -436,12 +488,131 @@ class SchemaState(rx.State):
                     if schemas_list:
                         self.available_schemas = schemas_list
                     self._compute_erd()
+
+                # Auto-trigger graph analysis after schema load
+                return SchemaState.run_context_discovery
             finally:
                 await connector.disconnect()
         except Exception as e:
             async with self:
                 self.schema_error = str(e)
                 self.is_loading = False
+
+    @rx.event(background=True)
+    async def run_context_discovery(self):
+        """Progressive context discovery — builds graph analysis + processes."""
+        from biai.state.database import DBState
+        from biai.models.connection import DBType
+
+        async with self:
+            if self.is_loading:
+                return
+            self.discovery_step = "Building schema graph..."
+            current_schema = self.selected_schema
+
+        try:
+            async with self:
+                db_state = await self.get_state(DBState)
+            async with db_state:
+                if not db_state.is_connected:
+                    return
+                config = db_state._get_config()
+
+            if config.db_type == DBType.ORACLE:
+                from biai.db.oracle import OracleConnector
+                connector = OracleConnector(config)
+            else:
+                from biai.db.postgresql import PostgreSQLConnector
+                connector = PostgreSQLConnector(config)
+
+            await connector.connect()
+            try:
+                from biai.db.schema_manager import SchemaManager
+                from biai.ai.metadata_graph import SchemaGraph
+
+                manager = SchemaManager(connector)
+                snapshot = await manager.get_snapshot(
+                    schema=current_schema, force_refresh=False,
+                )
+
+                # Step 1: Graph analysis (fast, in-memory)
+                async with self:
+                    self.discovery_step = "Analyzing schema graph..."
+
+                graph = SchemaGraph(snapshot)
+                stats = graph.get_stats()
+                communities = graph.find_table_communities()
+
+                # Build schema graph ECharts option
+                from biai.ai.echarts_builder import build_schema_graph_option
+                tbl_cols_copy = {}
+                async with self:
+                    tbl_cols_copy = dict(self.table_columns)
+
+                hub_tables_list = [
+                    {"name": name, "degree": str(degree)}
+                    for name, degree in stats.hub_tables[:10]
+                    if degree > 1
+                ]
+                graph_option = build_schema_graph_option(
+                    tbl_cols_copy, hub_tables_list, communities,
+                )
+
+                async with self:
+                    self.graph_hub_tables = hub_tables_list
+                    self.graph_components = stats.connected_components
+                    self.graph_communities = len(set(communities.values()))
+                    self.graph_star_schemas = [
+                        {"fact_table": s.fact_table, "fk_count": str(s.fk_count)}
+                        for s in stats.star_schemas[:5]
+                    ]
+                    self.graph_bridge_tables = stats.bridge_tables[:10]
+                    self.graph_cross_schema_edges = stats.cross_schema_edges
+                    if graph_option:
+                        self.schema_graph_option = graph_option
+                        self.show_schema_graph = True
+                    self.discovery_step = "Discovering processes..."
+
+                # Step 2: Process discovery (may query DB)
+                from biai.ai.process_discovery import ProcessDiscoveryEngine
+                from biai.ai.process_cache import ProcessDiscoveryCache
+                from biai.config.constants import DEFAULT_OLLAMA_HOST, DEFAULT_MODEL
+
+                try:
+                    from biai.state.model import ModelState
+                    async with self:
+                        model_state = await self.get_state(ModelState)
+                    async with model_state:
+                        ollama_host = model_state.ollama_host
+                        ollama_model = model_state.selected_model
+                except Exception:
+                    ollama_host = DEFAULT_OLLAMA_HOST
+                    ollama_model = DEFAULT_MODEL
+
+                engine = ProcessDiscoveryEngine(
+                    connector, snapshot,
+                    ollama_host=ollama_host,
+                    ollama_model=ollama_model,
+                    schema_name=snapshot.schema_name if snapshot.schema_name != "USER" else "",
+                )
+                processes = await engine.discover()
+
+                if processes:
+                    cache = ProcessDiscoveryCache()
+                    cache.store(connector.config, processes)
+
+                async with self:
+                    self.discovery_step = f"Found {len(processes)} processes"
+
+            finally:
+                await connector.disconnect()
+
+        except Exception as e:
+            from biai.utils.logger import get_logger
+            get_logger(__name__).warning("context_discovery_error", error=str(e))
+        finally:
+            async with self:
+                self.discovery_step = ""
 
     @rx.event(background=True)
     async def run_profiling(self):

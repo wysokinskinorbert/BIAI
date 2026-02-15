@@ -120,9 +120,9 @@ class TestProcessDetector:
 
     def test_detect_by_question_keywords(self, detector):
         df = pd.DataFrame({
-            "status": ["new", "in_progress", "done"],
-            "name": ["a", "b", "c"],
-            "value": [1, 2, 3],
+            "status": ["new", "in_progress", "done", "pending", "cancelled"],
+            "name": ["a", "b", "c", "d", "e"],
+            "value": [1, 2, 3, 4, 5],
         })
         assert detector.detect_in_dataframe(df, "show the process flow for orders")
 
@@ -372,10 +372,32 @@ class TestProcessLayout:
                     if ordered[j] in disc_stages:
                         assert disc_stages.index(ordered[j]) > idx
 
-    def test_order_states_no_discovery(self, builder):
+    def test_order_states_no_discovery_unknown(self, builder):
+        """Unknown states all score 0.5 so they sort alphabetically among themselves."""
         states = {"C", "A", "B"}
         ordered = builder._order_states(states, None)
-        assert ordered == ["A", "B", "C"]  # alphabetically sorted
+        assert ordered == ["A", "B", "C"]
+
+    def test_order_states_heuristic_lifecycle(self, builder):
+        """Lifecycle stages should be ordered logically, not alphabetically."""
+        states = {"completed", "active", "pending", "cancelled", "draft"}
+        ordered = builder._order_states(states, None)
+        # draft (0.02) < pending (0.10) < active (0.40) < completed (0.90) < cancelled (0.94)
+        assert ordered == ["draft", "pending", "active", "completed", "cancelled"]
+
+    def test_order_states_heuristic_hr(self, builder):
+        """HR employment statuses should follow logical order."""
+        states = {"terminated", "active", "on_leave", "probation"}
+        ordered = builder._order_states(states, None)
+        # probation (0.28) < active (0.40) < on_leave (0.55) < terminated (0.94)
+        assert ordered == ["probation", "active", "on_leave", "terminated"]
+
+    def test_order_states_heuristic_orders(self, builder):
+        """Order processing statuses: start → middle → end."""
+        states = {"delivered", "draft", "shipped", "confirmed", "cancelled"}
+        ordered = builder._order_states(states, None)
+        # draft (0.02) < confirmed (0.25) < shipped (0.44) < delivered (0.88) < cancelled (0.94)
+        assert ordered == ["draft", "confirmed", "shipped", "delivered", "cancelled"]
 
     def test_order_states_extra_states(self, builder, order_discovery):
         states = {"order_placed", "delivered", "extra_state"}

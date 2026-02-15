@@ -110,12 +110,13 @@ class SQLValidator:
         if statement is None:
             return "Failed to parse SQL statement", None
 
-        # Must be a SELECT expression
-        if not isinstance(statement, exp.Select):
+        # Must be a SELECT or set operation (UNION, INTERSECT, EXCEPT)
+        _allowed_roots = (exp.Select, exp.Union, exp.Intersect, exp.Except)
+        if not isinstance(statement, _allowed_roots):
             stmt_type = type(statement).__name__
             return f"Only SELECT statements allowed, got: {stmt_type}", None
 
-        # Check for subqueries containing non-SELECT
+        # Check for subqueries containing non-SELECT (walks entire tree including UNION branches)
         for node in statement.walk():
             if isinstance(node, (exp.Insert, exp.Update, exp.Delete, exp.Drop,
                                  exp.Create, exp.Alter)):

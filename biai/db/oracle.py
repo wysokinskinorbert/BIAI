@@ -87,6 +87,13 @@ class OracleConnector(DatabaseConnector):
         )
 
     async def get_tables(self, schema: str = "") -> list[TableInfo]:
+        """Get tables with columns, PKs, and FKs using batch queries.
+
+        Uses 3 batch queries instead of N+1 per-table queries:
+        1. All columns in one query
+        2. All PKs in one query
+        3. All FKs in one query (with cross-schema reference support)
+        """
         if not self._pool:
             raise RuntimeError("Not connected to Oracle")
 
@@ -97,76 +104,106 @@ class OracleConnector(DatabaseConnector):
             try:
                 cursor = conn.cursor()
 
-                # Get tables
+                # Resolve actual owner
                 if schema_filter == "USER":
-                    cursor.execute(
-                        "SELECT table_name FROM user_tables ORDER BY table_name"
-                    )
+                    cursor.execute("SELECT USER FROM DUAL")
+                    actual_owner = cursor.fetchone()[0]
                 else:
-                    cursor.execute(
-                        "SELECT table_name FROM all_tables WHERE owner = :owner ORDER BY table_name",
-                        owner=schema_filter,
-                    )
-                table_names = [row[0] for row in cursor.fetchall()]
+                    actual_owner = schema_filter
 
+                # Get table names (including views)
+                if schema_filter == "USER":
+                    cursor.execute("""
+                        SELECT table_name, 'TABLE' AS object_type FROM user_tables
+                        UNION ALL
+                        SELECT view_name, 'VIEW' AS object_type FROM user_views
+                        ORDER BY 1
+                    """)
+                else:
+                    cursor.execute("""
+                        SELECT table_name, 'TABLE' AS object_type FROM all_tables WHERE owner = :owner
+                        UNION ALL
+                        SELECT view_name, 'VIEW' AS object_type FROM all_views WHERE owner = :owner
+                        ORDER BY 1
+                    """, owner=actual_owner)
+                name_rows = cursor.fetchall()
+                table_names = [row[0] for row in name_rows]
+                object_types = {row[0]: row[1] for row in name_rows}
+
+                if not table_names:
+                    cursor.close()
+                    return []
+
+                # --- BATCH 1: All columns in one query ---
+                cursor.execute("""
+                    SELECT table_name, column_name, data_type, nullable, data_length
+                    FROM all_tab_columns
+                    WHERE owner = :owner
+                    ORDER BY table_name, column_id
+                """, owner=actual_owner)
+                all_cols_rows = cursor.fetchall()
+
+                # Group by table
+                from collections import defaultdict
+                cols_by_table: dict[str, list] = defaultdict(list)
+                for row in all_cols_rows:
+                    cols_by_table[row[0]].append(row[1:])  # (col_name, dtype, nullable, length)
+
+                # --- BATCH 2: All PKs in one query ---
+                cursor.execute("""
+                    SELECT cons.table_name, cols.column_name
+                    FROM all_constraints cons
+                    JOIN all_cons_columns cols
+                      ON cons.owner = cols.owner
+                      AND cons.constraint_name = cols.constraint_name
+                    WHERE cons.constraint_type = 'P'
+                      AND cons.owner = :owner
+                """, owner=actual_owner)
+                pk_by_table: dict[str, set[str]] = defaultdict(set)
+                for row in cursor.fetchall():
+                    pk_by_table[row[0]].add(row[1])
+
+                # --- BATCH 3: All FKs in one query (with cross-schema ref) ---
+                cursor.execute("""
+                    SELECT cons.table_name, cols.column_name,
+                           r_cons.owner AS ref_schema,
+                           r_cons.table_name AS ref_table
+                    FROM all_constraints cons
+                    JOIN all_cons_columns cols
+                      ON cons.owner = cols.owner
+                      AND cons.constraint_name = cols.constraint_name
+                    JOIN all_constraints r_cons
+                      ON cons.r_constraint_name = r_cons.constraint_name
+                      AND cons.r_owner = r_cons.owner
+                    WHERE cons.constraint_type = 'R'
+                      AND cons.owner = :owner
+                """, owner=actual_owner)
+                # fk_by_table[table_name] = {col_name: "REF_SCHEMA.REF_TABLE" or "REF_TABLE"}
+                fk_by_table: dict[str, dict[str, str]] = defaultdict(dict)
+                for row in cursor.fetchall():
+                    tname, col_name, ref_schema, ref_table = row
+                    # Include schema prefix for cross-schema FKs
+                    if ref_schema and ref_schema != actual_owner:
+                        fk_by_table[tname][col_name] = f"{ref_schema}.{ref_table}"
+                    else:
+                        fk_by_table[tname][col_name] = ref_table
+
+                cursor.close()
+
+                # --- Assemble TableInfo objects ---
                 tables = []
                 for tname in table_names:
-                    # Get columns
-                    owner_param = schema_filter if schema_filter != "USER" else None
-                    cursor.execute("""
-                        SELECT column_name, data_type, nullable, data_length
-                        FROM all_tab_columns
-                        WHERE table_name = :tname
-                        AND owner = NVL(:owner, USER)
-                        ORDER BY column_id
-                    """, tname=tname, owner=owner_param)
-                    col_rows = cursor.fetchall()
-
-                    # Resolve actual owner for constraint queries
-                    if schema_filter == "USER":
-                        cursor.execute("SELECT USER FROM DUAL")
-                        actual_owner = cursor.fetchone()[0]
-                    else:
-                        actual_owner = schema_filter
-
-                    # Get primary key columns (all_constraints works across schemas)
-                    pk_query = (
-                        "SELECT cols.column_name "
-                        "FROM all_constraints cons "
-                        "JOIN all_cons_columns cols "
-                        "  ON cons.owner = cols.owner "
-                        "  AND cons.constraint_name = cols.constraint_name "
-                        "WHERE cons.constraint_type = 'P' "
-                        "  AND cons.table_name = :tname "
-                        "  AND cons.owner = :owner"
-                    )
-                    cursor.execute(pk_query, tname=tname, owner=actual_owner)
-                    pk_columns = {row[0] for row in cursor.fetchall()}
-
-                    # Get foreign key columns with referenced table
-                    fk_query = (
-                        "SELECT cols.column_name, r_cons.table_name AS ref_table "
-                        "FROM all_constraints cons "
-                        "JOIN all_cons_columns cols "
-                        "  ON cons.owner = cols.owner "
-                        "  AND cons.constraint_name = cols.constraint_name "
-                        "JOIN all_constraints r_cons "
-                        "  ON cons.r_constraint_name = r_cons.constraint_name "
-                        "  AND cons.r_owner = r_cons.owner "
-                        "WHERE cons.constraint_type = 'R' "
-                        "  AND cons.table_name = :tname "
-                        "  AND cons.owner = :owner"
-                    )
-                    cursor.execute(fk_query, tname=tname, owner=actual_owner)
-                    fk_map = {row[0]: row[1] for row in cursor.fetchall()}
+                    col_rows = cols_by_table.get(tname, [])
+                    pk_columns = pk_by_table.get(tname, set())
+                    fk_map = fk_by_table.get(tname, {})
 
                     columns = []
                     for col_row in col_rows:
-                        col_name = col_row[0]
+                        col_name, dtype, nullable, length = col_row
                         columns.append(ColumnInfo(
                             name=col_name,
-                            data_type=f"{col_row[1]}({col_row[3]})" if col_row[3] else col_row[1],
-                            nullable=col_row[2] == "Y",
+                            data_type=f"{dtype}({length})" if length else dtype,
+                            nullable=nullable == "Y",
                             is_primary_key=col_name in pk_columns,
                             is_foreign_key=col_name in fk_map,
                             foreign_key_ref=fk_map.get(col_name),
@@ -176,9 +213,9 @@ class OracleConnector(DatabaseConnector):
                         name=tname,
                         schema_name=schema_filter if schema_filter != "USER" else "",
                         columns=columns,
+                        object_type=object_types.get(tname, "TABLE"),
                     ))
 
-                cursor.close()
                 return tables
             finally:
                 self._pool.release(conn)
@@ -187,11 +224,167 @@ class OracleConnector(DatabaseConnector):
 
     async def get_schema_snapshot(self, schema: str = "") -> SchemaSnapshot:
         tables = await self.get_tables(schema)
+        triggers = await self.get_triggers(schema)
+        procedures = await self.get_procedures(schema)
+        dependencies = await self.get_dependencies(schema)
         return SchemaSnapshot(
             tables=tables,
+            triggers=triggers,
+            procedures=procedures,
+            dependencies=dependencies,
             db_type="oracle",
             schema_name=schema or "USER",
         )
+
+    async def get_triggers(self, schema: str = "") -> list:
+        """Discover triggers — reveals business logic transitions."""
+        if not self._pool:
+            return []
+        from biai.models.schema import TriggerInfo
+        schema_filter = schema.upper() if schema else "USER"
+
+        def _get():
+            conn = self._pool.acquire()
+            try:
+                cursor = conn.cursor()
+                if schema_filter == "USER":
+                    cursor.execute("""
+                        SELECT trigger_name, table_name,
+                               triggering_event, trigger_type,
+                               DBMS_METADATA.GET_DDL('TRIGGER', trigger_name)
+                        FROM user_triggers
+                        WHERE table_name IS NOT NULL
+                    """)
+                    owner = ""
+                else:
+                    cursor.execute("""
+                        SELECT trigger_name, table_name,
+                               triggering_event, trigger_type, ''
+                        FROM all_triggers
+                        WHERE owner = :owner AND table_name IS NOT NULL
+                    """, owner=schema_filter)
+                    owner = schema_filter
+                results = []
+                for row in cursor.fetchall():
+                    # Truncate trigger body to 500 chars
+                    body = str(row[4] or "")[:500]
+                    timing = ""
+                    ttype = str(row[3] or "")
+                    if "BEFORE" in ttype:
+                        timing = "BEFORE"
+                    elif "AFTER" in ttype:
+                        timing = "AFTER"
+                    elif "INSTEAD" in ttype:
+                        timing = "INSTEAD OF"
+                    results.append(TriggerInfo(
+                        trigger_name=row[0],
+                        table_name=row[1],
+                        trigger_event=str(row[2] or ""),
+                        timing=timing,
+                        trigger_body=body,
+                        schema_name=owner,
+                    ))
+                cursor.close()
+                return results
+            except Exception:
+                return []
+            finally:
+                self._pool.release(conn)
+
+        return await asyncio.to_thread(_get)
+
+    async def get_procedures(self, schema: str = "") -> list:
+        """Discover stored procedures/packages."""
+        if not self._pool:
+            return []
+        from biai.models.schema import ProcedureInfo
+        schema_filter = schema.upper() if schema else "USER"
+
+        def _get():
+            conn = self._pool.acquire()
+            try:
+                cursor = conn.cursor()
+                if schema_filter == "USER":
+                    cursor.execute("""
+                        SELECT object_name, object_type, procedure_name
+                        FROM user_procedures
+                        WHERE object_type IN ('PROCEDURE', 'FUNCTION', 'PACKAGE')
+                        ORDER BY object_name
+                    """)
+                    owner = ""
+                else:
+                    cursor.execute("""
+                        SELECT object_name, object_type, procedure_name
+                        FROM all_procedures
+                        WHERE owner = :owner
+                          AND object_type IN ('PROCEDURE', 'FUNCTION', 'PACKAGE')
+                        ORDER BY object_name
+                    """, owner=schema_filter)
+                    owner = schema_filter
+                results = []
+                for row in cursor.fetchall():
+                    results.append(ProcedureInfo(
+                        name=row[0],
+                        object_type=row[1] or "PROCEDURE",
+                        schema_name=owner,
+                        sub_program=row[2] or "",
+                    ))
+                cursor.close()
+                return results
+            except Exception:
+                return []
+            finally:
+                self._pool.release(conn)
+
+        return await asyncio.to_thread(_get)
+
+    async def get_dependencies(self, schema: str = "") -> list:
+        """Discover object dependencies (which procs use which tables)."""
+        if not self._pool:
+            return []
+        from biai.models.schema import DependencyInfo
+        schema_filter = schema.upper() if schema else "USER"
+
+        def _get():
+            conn = self._pool.acquire()
+            try:
+                cursor = conn.cursor()
+                if schema_filter == "USER":
+                    cursor.execute("""
+                        SELECT name, type, referenced_name, referenced_type
+                        FROM user_dependencies
+                        WHERE referenced_type IN ('TABLE', 'VIEW')
+                          AND type IN ('PROCEDURE', 'FUNCTION', 'TRIGGER', 'PACKAGE BODY')
+                        ORDER BY name
+                    """)
+                    owner = ""
+                else:
+                    cursor.execute("""
+                        SELECT name, type, referenced_name, referenced_type
+                        FROM all_dependencies
+                        WHERE owner = :owner
+                          AND referenced_type IN ('TABLE', 'VIEW')
+                          AND type IN ('PROCEDURE', 'FUNCTION', 'TRIGGER', 'PACKAGE BODY')
+                        ORDER BY name
+                    """, owner=schema_filter)
+                    owner = schema_filter
+                results = []
+                for row in cursor.fetchall():
+                    results.append(DependencyInfo(
+                        name=row[0],
+                        object_type=row[1] or "",
+                        referenced_name=row[2] or "",
+                        referenced_type=row[3] or "",
+                        schema_name=owner,
+                    ))
+                cursor.close()
+                return results
+            except Exception:
+                return []
+            finally:
+                self._pool.release(conn)
+
+        return await asyncio.to_thread(_get)
 
     async def get_schemas(self) -> list[str]:
         if not self._pool:

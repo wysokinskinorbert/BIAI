@@ -32,8 +32,8 @@ class TestCanUseEcharts:
     def test_table_not_supported(self):
         assert not can_use_echarts(ChartType.TABLE)
 
-    def test_sankey_not_supported(self):
-        assert not can_use_echarts(ChartType.SANKEY)
+    def test_sankey_supported(self):
+        assert can_use_echarts(ChartType.SANKEY)
 
 
 class TestBuildEchartsOption:

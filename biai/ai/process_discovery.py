@@ -1,11 +1,17 @@
 """Dynamic process discovery engine.
 
 Discovers business processes from database schema and data by:
-1. Finding status columns (low-cardinality VARCHAR/TEXT with status-like names)
-2. Finding transition tables (from_*/to_* column pairs, *_history tables)
-3. Analyzing FK chains for entity relationships
-4. Querying actual data for stage counts and transitions
-5. Optionally using AI (Ollama) to interpret and label processes
+1. Building SchemaGraph from ALL tables (not limited to first N)
+2. Finding status columns (low-cardinality VARCHAR/TEXT with status-like names)
+3. Finding transition tables (from_*/to_* column pairs, *_history tables)
+4. Analyzing FK chains and graph topology for entity relationships
+5. Detecting timestamp sequences (lifecycle columns)
+6. Detecting trigger-based process signals
+7. Querying actual data for stage counts and transitions
+8. Optionally using AI (Ollama) to interpret and label processes
+
+Graph-driven approach: SchemaGraph analyzes structure of ALL tables in-memory (O(n)),
+then selective DB queries only for top candidates (max ~20 queries).
 """
 
 import json
@@ -14,10 +20,10 @@ from collections import defaultdict
 
 import httpx
 
+from biai.ai.metadata_graph import SchemaGraph
 from biai.ai.prompt_templates import PROCESS_DISCOVERY_PROMPT
 from biai.config.constants import (
     DISCOVERY_MAX_CARDINALITY,
-    DISCOVERY_MAX_TABLES,
     DISCOVERY_QUERY_TIMEOUT,
     DEFAULT_OLLAMA_HOST,
     DEFAULT_MODEL,
@@ -27,6 +33,7 @@ from biai.models.discovery import (
     ColumnCandidate,
     DiscoveredProcess,
     EntityChain,
+    Evidence,
     TransitionPattern,
 )
 from biai.models.schema import SchemaSnapshot, TableInfo
@@ -92,41 +99,65 @@ class ProcessDiscoveryEngine:
         return table_name
 
     async def discover(self) -> list[DiscoveredProcess]:
-        """Run full discovery pipeline and return found processes."""
-        tables = self._schema.tables[:DISCOVERY_MAX_TABLES]
+        """Run full discovery pipeline using graph-driven approach.
+
+        Instead of limiting to first N tables, builds a SchemaGraph
+        of ALL tables and uses graph topology to find candidates.
+        """
+        tables = self._schema.tables
         if not tables:
             logger.warning("discovery_no_tables")
             return []
 
-        # Step 1: Find status columns
+        # Step 1: Build SchemaGraph from ALL tables (fast, in-memory)
+        graph = SchemaGraph(self._schema)
+        logger.info(
+            "discovery_graph_built",
+            tables=graph.table_count,
+            edges=graph.edge_count,
+        )
+
+        # Step 2: Find status columns (scans ALL tables, O(n))
         status_candidates = self._find_status_columns(tables)
         logger.info("discovery_status_candidates", count=len(status_candidates))
 
-        # Step 2: Find transition tables
+        # Step 3: Find transition tables (scans ALL tables, O(n))
         transition_patterns = self._find_transition_tables(tables)
         logger.info("discovery_transition_patterns", count=len(transition_patterns))
 
-        # Step 3: Find FK chains
-        entity_chains = self._find_fk_chains(tables)
+        # Step 4: Find FK chains from FULL graph (not limited subset)
+        entity_chains = self._find_fk_chains_from_graph(graph)
         logger.info("discovery_entity_chains", count=len(entity_chains))
 
-        # Step 4: Build candidate processes
+        # Step 5: Find timestamp sequences (lifecycle columns)
+        timestamp_candidates = self._find_timestamp_sequences(tables)
+        logger.info("discovery_timestamp_sequences", count=len(timestamp_candidates))
+
+        # Step 6: Find trigger-based process signals
+        trigger_signals = self._find_trigger_signals()
+        logger.info("discovery_trigger_signals", count=len(trigger_signals))
+
+        # Step 7: Build candidates with evidence from ALL signals + graph topology
         candidates = self._build_candidates(
             status_candidates, transition_patterns, entity_chains,
+            graph=graph,
+            timestamp_candidates=timestamp_candidates,
+            trigger_signals=trigger_signals,
         )
 
         if not candidates:
             logger.info("discovery_no_candidates")
             return []
 
-        # Step 5: Enrich with actual data
-        await self._enrich_with_data(candidates)
+        # Step 8: Enrich TOP candidates with actual data (selective DB queries)
+        top_candidates = sorted(candidates, key=lambda c: c.confidence, reverse=True)[:20]
+        await self._enrich_with_data(top_candidates)
 
-        # Step 6: Filter low-confidence
-        viable = [c for c in candidates if c.confidence >= 0.3]
+        # Step 9: Filter low-confidence
+        viable = [c for c in top_candidates if c.confidence >= 0.3]
         logger.info("discovery_viable", count=len(viable), total=len(candidates))
 
-        # Step 7: Try AI interpretation (best-effort)
+        # Step 10: Try AI interpretation (best-effort)
         if viable:
             await self._ai_interpret(viable)
 
@@ -203,50 +234,141 @@ class ProcessDiscoveryEngine:
         return patterns
 
     # ------------------------------------------------------------------
-    # Step 3: FK chains
+    # Step 3: FK chains (graph-driven)
     # ------------------------------------------------------------------
 
-    def _find_fk_chains(self, tables: list[TableInfo]) -> list[EntityChain]:
-        """Discover FK-based entity chains (A -> B -> C)."""
-        # Build adjacency: table -> list of (referenced_table, local_col, ref_col)
-        adj: dict[str, list[tuple[str, str, str]]] = defaultdict(list)
-        table_set = {t.name.upper() for t in tables}
+    def _find_fk_chains_from_graph(self, graph: SchemaGraph) -> list[EntityChain]:
+        """Discover FK chains from SchemaGraph (uses full graph, not limited subset).
 
-        for table in tables:
-            for col in table.columns:
-                if col.is_foreign_key and col.foreign_key_ref:
-                    ref = col.foreign_key_ref
-                    # ref format: "TABLE.COLUMN" or "schema.TABLE.COLUMN"
-                    parts = ref.split(".")
-                    ref_table = parts[-2] if len(parts) >= 2 else parts[0]
-                    if ref_table.upper() in table_set:
-                        adj[table.name.upper()].append((
-                            ref_table.upper(),
-                            col.name,
-                            parts[-1] if len(parts) >= 2 else "",
+        Combines two strategies:
+        - Graph FK chains (paths of length 3+ in the FK graph)
+        - History/audit table chains (tables with _history suffix + FKs)
+        """
+        chains: list[EntityChain] = []
+        seen_keys: set[str] = set()
+
+        # Strategy 1: Graph-based FK chains
+        fk_chains = graph.find_fk_chains(min_length=3)
+        for chain_path in fk_chains[:30]:  # top 30 chains
+            key = "|".join(chain_path)
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            entity_name = chain_path[0].lower().replace("_", " ")
+            chains.append(EntityChain(
+                tables=list(chain_path),
+                entity_name=entity_name,
+            ))
+
+        # Strategy 2: History/audit tables with FK refs (original approach)
+        for table in self._schema.tables:
+            if any(table.name.lower().endswith(sfx) for sfx in _HISTORY_SUFFIXES):
+                edges = graph.get_fk_neighbors(table.name)
+                if edges:
+                    chain_tables = [table.name.upper()]
+                    join_keys: list[tuple[str, str]] = []
+                    for edge in edges:
+                        chain_tables.append(edge.target_table)
+                        join_keys.append((edge.source_column, ""))
+                    key = "|".join(chain_tables)
+                    if key not in seen_keys:
+                        seen_keys.add(key)
+                        entity = table.name.lower()
+                        for sfx in _HISTORY_SUFFIXES:
+                            entity = entity.removesuffix(sfx)
+                        chains.append(EntityChain(
+                            tables=chain_tables,
+                            join_keys=join_keys,
+                            entity_name=entity,
                         ))
 
-        # Find chains of length >= 2 that involve history/log tables
-        chains: list[EntityChain] = []
-        for table in tables:
-            if any(table.name.lower().endswith(sfx) for sfx in _HISTORY_SUFFIXES):
-                refs = adj.get(table.name.upper(), [])
-                if refs:
-                    chain_tables = [table.name]
-                    join_keys: list[tuple[str, str]] = []
-                    for ref_table, local_col, ref_col in refs:
-                        chain_tables.append(ref_table)
-                        join_keys.append((local_col, ref_col))
-                    entity = table.name.lower()
-                    for sfx in _HISTORY_SUFFIXES:
-                        entity = entity.removesuffix(sfx)
-                    chains.append(EntityChain(
-                        tables=chain_tables,
-                        join_keys=join_keys,
-                        entity_name=entity,
-                    ))
-
         return chains
+
+    # ------------------------------------------------------------------
+    # Step 5: Timestamp sequences
+    # ------------------------------------------------------------------
+
+    def _find_timestamp_sequences(self, tables: list[TableInfo]) -> list[ColumnCandidate]:
+        """Find tables with 3+ timestamp columns (lifecycle patterns).
+
+        Tables with columns like created_at, started_at, completed_at
+        suggest a process lifecycle.
+        """
+        candidates: list[ColumnCandidate] = []
+        timestamp_types = {"timestamp", "date", "datetime", "timestamptz",
+                          "timestamp with time zone", "timestamp without time zone"}
+
+        for table in tables:
+            ts_cols = []
+            for col in table.columns:
+                dtype = col.data_type.lower().split("(")[0].strip()
+                col_lower = col.name.lower()
+                is_ts_type = dtype in timestamp_types
+                is_ts_name = any(re.match(p, col_lower) for p in _TIMESTAMP_PATTERNS)
+                if is_ts_type or is_ts_name:
+                    ts_cols.append(col.name)
+
+            if len(ts_cols) >= 3:
+                candidates.append(ColumnCandidate(
+                    table_name=table.name,
+                    column_name=", ".join(ts_cols),
+                    role="timestamp",
+                    distinct_values=ts_cols,
+                    cardinality=len(ts_cols),
+                    confidence=min(0.3 + len(ts_cols) * 0.1, 0.8),
+                ))
+
+        return candidates
+
+    # ------------------------------------------------------------------
+    # Step 6: Trigger-based signals
+    # ------------------------------------------------------------------
+
+    def _find_trigger_signals(self) -> list[Evidence]:
+        """Detect triggers on status/state columns as process signals.
+
+        Triggers on UPDATE of status columns are strong evidence of business processes.
+        """
+        signals: list[Evidence] = []
+        if not self._schema.triggers:
+            return signals
+
+        # Build lookup of status column tables
+        status_tables: set[str] = set()
+        for table in self._schema.tables:
+            for col in table.columns:
+                col_lower = col.name.lower()
+                if any(re.match(p, col_lower) for p in _STATUS_NAME_PATTERNS):
+                    status_tables.add(table.name.upper())
+                    break
+
+        for trigger in self._schema.triggers:
+            trigger_table = trigger.table_name.upper()
+            is_update = "UPDATE" in trigger.trigger_event.upper()
+            is_status_table = trigger_table in status_tables
+
+            if is_update and is_status_table:
+                signals.append(Evidence(
+                    signal_type="trigger_on_status",
+                    description=(
+                        f"Trigger '{trigger.trigger_name}' fires on UPDATE of "
+                        f"table '{trigger.table_name}' which has a status column"
+                    ),
+                    strength=0.8,
+                    source_table=trigger.table_name,
+                ))
+            elif is_update:
+                signals.append(Evidence(
+                    signal_type="trigger_on_status",
+                    description=(
+                        f"Trigger '{trigger.trigger_name}' fires on UPDATE of "
+                        f"table '{trigger.table_name}'"
+                    ),
+                    strength=0.4,
+                    source_table=trigger.table_name,
+                ))
+
+        return signals
 
     # ------------------------------------------------------------------
     # Step 4: Build candidates
@@ -257,53 +379,203 @@ class ProcessDiscoveryEngine:
         status_cols: list[ColumnCandidate],
         transitions: list[TransitionPattern],
         chains: list[EntityChain],
+        *,
+        graph: SchemaGraph | None = None,
+        timestamp_candidates: list[ColumnCandidate] | None = None,
+        trigger_signals: list[Evidence] | None = None,
     ) -> list[DiscoveredProcess]:
-        """Combine discovery signals into process candidates."""
-        candidates: list[DiscoveredProcess] = []
-        seen_tables: set[str] = set()
+        """Combine discovery signals into process candidates with weighted evidence.
 
-        # Priority 1: Transition patterns (strongest signal)
+        Confidence scoring weights:
+            transition_table:   0.30
+            status_column:      0.20
+            trigger_on_status:  0.15
+            fk_hub (degree>5):  0.10
+            fk_chain (len>=3):  0.10
+            timestamp_sequence: 0.05
+            star_schema_fact:   0.05
+            data_enrichment:    0.05  (applied later in _enrich_with_data)
+        """
+        candidates: dict[str, DiscoveredProcess] = {}
+        timestamp_candidates = timestamp_candidates or []
+        trigger_signals = trigger_signals or []
+
+        # --- Priority 1: Transition patterns (strongest signal, weight=0.30) ---
         for tp in transitions:
             proc_id = tp.table_name.lower().replace(" ", "_")
-            if proc_id in seen_tables:
-                continue
-            seen_tables.add(proc_id)
-            candidates.append(DiscoveredProcess(
-                id=proc_id,
-                name=tp.table_name.replace("_", " ").title(),
-                tables=[tp.table_name],
-                transition_pattern=tp,
-                confidence=0.7,
+            proc = candidates.get(proc_id)
+            if proc is None:
+                proc = DiscoveredProcess(
+                    id=proc_id,
+                    name=tp.table_name.replace("_", " ").title(),
+                    tables=[tp.table_name],
+                )
+                candidates[proc_id] = proc
+            proc.transition_pattern = tp
+            proc.evidence.append(Evidence(
+                signal_type="transition_table",
+                description=f"Table '{tp.table_name}' has from/to columns: "
+                            f"{tp.from_column} → {tp.to_column}",
+                strength=0.9,
+                source_table=tp.table_name,
             ))
+            proc.confidence = min(proc.confidence + 0.30, 1.0)
 
-        # Priority 2: Status columns (medium signal)
+        # --- Priority 2: Status columns (weight=0.20) ---
         for sc in status_cols:
-            table_key = sc.table_name.lower()
-            if table_key in seen_tables:
-                # Merge with existing candidate
-                for c in candidates:
-                    if c.id == table_key:
-                        c.status_column = sc
-                        c.confidence = min(c.confidence + 0.1, 1.0)
-                continue
-            seen_tables.add(table_key)
-            candidates.append(DiscoveredProcess(
-                id=table_key,
-                name=sc.table_name.replace("_", " ").title(),
-                tables=[sc.table_name],
-                status_column=sc,
-                confidence=sc.confidence * 0.6,
+            proc_id = sc.table_name.lower().replace(" ", "_")
+            proc = candidates.get(proc_id)
+            if proc is None:
+                proc = DiscoveredProcess(
+                    id=proc_id,
+                    name=sc.table_name.replace("_", " ").title(),
+                    tables=[sc.table_name],
+                )
+                candidates[proc_id] = proc
+            proc.status_column = sc
+            proc.evidence.append(Evidence(
+                signal_type="status_column",
+                description=f"Column '{sc.column_name}' in table '{sc.table_name}' "
+                            f"matches status pattern (confidence={sc.confidence:.1f})",
+                strength=sc.confidence,
+                source_table=sc.table_name,
+                source_column=sc.column_name,
             ))
+            proc.confidence = min(proc.confidence + 0.20, 1.0)
 
-        # Enrich with entity chains
+        # --- Trigger signals (weight=0.15) ---
+        trigger_by_table: dict[str, list[Evidence]] = defaultdict(list)
+        for sig in trigger_signals:
+            trigger_by_table[sig.source_table.lower().replace(" ", "_")].append(sig)
+
+        for proc_id, sigs in trigger_by_table.items():
+            proc = candidates.get(proc_id)
+            if proc is None:
+                table_name = sigs[0].source_table
+                proc = DiscoveredProcess(
+                    id=proc_id,
+                    name=table_name.replace("_", " ").title(),
+                    tables=[table_name],
+                )
+                candidates[proc_id] = proc
+            proc.evidence.extend(sigs)
+            proc.confidence = min(proc.confidence + 0.15, 1.0)
+
+        # --- Graph topology signals ---
+        if graph:
+            # Hub tables (degree > 5, weight=0.10)
+            hubs = graph.find_hubs(top_n=30)
+            for table_name, degree in hubs:
+                if degree < 5:
+                    continue
+                proc_id = table_name.lower().replace(" ", "_")
+                proc = candidates.get(proc_id)
+                if proc is None:
+                    proc = DiscoveredProcess(
+                        id=proc_id,
+                        name=table_name.replace("_", " ").title(),
+                        tables=[table_name],
+                    )
+                    candidates[proc_id] = proc
+                proc.evidence.append(Evidence(
+                    signal_type="hub_table",
+                    description=f"Table '{table_name}' is a hub with "
+                                f"{degree} FK connections",
+                    strength=min(degree / 10.0, 1.0),
+                    source_table=table_name,
+                ))
+                proc.confidence = min(proc.confidence + 0.10, 1.0)
+
+            # Star schema facts (weight=0.05)
+            stars = graph.find_star_schemas(min_dimensions=3)
+            for star in stars:
+                proc_id = star.fact_table.lower().replace(" ", "_")
+                proc = candidates.get(proc_id)
+                if proc is None:
+                    proc = DiscoveredProcess(
+                        id=proc_id,
+                        name=star.fact_table.replace("_", " ").title(),
+                        tables=[star.fact_table] + star.dimension_tables,
+                    )
+                    candidates[proc_id] = proc
+                else:
+                    proc.tables = list(set(proc.tables + star.dimension_tables))
+                proc.evidence.append(Evidence(
+                    signal_type="star_schema_fact",
+                    description=f"Table '{star.fact_table}' is a star schema fact "
+                                f"with {star.fk_count} dimension FKs",
+                    strength=min(star.fk_count / 8.0, 1.0),
+                    source_table=star.fact_table,
+                ))
+                proc.confidence = min(proc.confidence + 0.05, 1.0)
+
+        # --- FK chain enrichment (weight=0.10) ---
         for chain in chains:
-            for c in candidates:
-                if any(t.upper() in [ct.upper() for ct in chain.tables] for t in c.tables):
-                    c.entity_chain = chain
-                    c.tables = list(set(c.tables + chain.tables))
-                    c.confidence = min(c.confidence + 0.1, 1.0)
+            chain_tables_upper = {t.upper() for t in chain.tables}
+            matched = False
+            for proc in candidates.values():
+                proc_tables_upper = {t.upper() for t in proc.tables}
+                if proc_tables_upper & chain_tables_upper:
+                    proc.entity_chain = chain
+                    proc.tables = list(set(proc.tables + chain.tables))
+                    proc.evidence.append(Evidence(
+                        signal_type="fk_chain",
+                        description=f"FK chain of length {len(chain.tables)}: "
+                                    f"{' → '.join(chain.tables[:5])}",
+                        strength=min(len(chain.tables) / 5.0, 1.0),
+                        source_table=chain.tables[0] if chain.tables else "",
+                    ))
+                    proc.confidence = min(proc.confidence + 0.10, 1.0)
+                    matched = True
+                    break
+            if not matched and len(chain.tables) >= 3:
+                proc_id = chain.entity_name or chain.tables[0].lower()
+                proc_id = proc_id.replace(" ", "_")
+                if proc_id not in candidates:
+                    proc = DiscoveredProcess(
+                        id=proc_id,
+                        name=chain.entity_name.replace("_", " ").title()
+                             if chain.entity_name else chain.tables[0],
+                        tables=list(chain.tables),
+                        entity_chain=chain,
+                    )
+                    proc.evidence.append(Evidence(
+                        signal_type="fk_chain",
+                        description=f"FK chain of length {len(chain.tables)}: "
+                                    f"{' → '.join(chain.tables[:5])}",
+                        strength=min(len(chain.tables) / 5.0, 1.0),
+                        source_table=chain.tables[0] if chain.tables else "",
+                    ))
+                    proc.confidence = 0.10
+                    candidates[proc_id] = proc
 
-        return candidates
+        # --- Timestamp sequences (weight=0.05) ---
+        for ts_cand in timestamp_candidates:
+            proc_id = ts_cand.table_name.lower().replace(" ", "_")
+            proc = candidates.get(proc_id)
+            if proc is None:
+                proc = DiscoveredProcess(
+                    id=proc_id,
+                    name=ts_cand.table_name.replace("_", " ").title(),
+                    tables=[ts_cand.table_name],
+                )
+                candidates[proc_id] = proc
+            proc.evidence.append(Evidence(
+                signal_type="timestamp_sequence",
+                description=f"Table '{ts_cand.table_name}' has {ts_cand.cardinality} "
+                            f"timestamp columns: {ts_cand.column_name}",
+                strength=ts_cand.confidence,
+                source_table=ts_cand.table_name,
+            ))
+            proc.confidence = min(proc.confidence + 0.05, 1.0)
+
+        # Filter: require at least 2 evidence signals for standalone candidates
+        result = []
+        for proc in candidates.values():
+            if len(proc.evidence) >= 2 or proc.confidence >= 0.25:
+                result.append(proc)
+
+        return result
 
     # ------------------------------------------------------------------
     # Step 5: Enrich with data
@@ -367,9 +639,16 @@ class ProcessDiscoveryEngine:
                 if len(tgts) > 1:
                     proc.branches[src] = sorted(tgts)
 
-            # Boost confidence based on data quality
+            # Boost confidence based on data quality (data_enrichment weight=0.05)
             if len(proc.stages) >= 3:
-                proc.confidence = min(proc.confidence + 0.2, 1.0)
+                proc.evidence.append(Evidence(
+                    signal_type="data_enrichment",
+                    description=f"Transition data has {len(proc.stages)} distinct "
+                                f"stages with {len(transitions)} transitions",
+                    strength=min(len(proc.stages) / 8.0, 1.0),
+                    source_table=tp.table_name,
+                ))
+                proc.confidence = min(proc.confidence + 0.05, 1.0)
 
         except Exception as e:
             logger.warning("discovery_transition_query_error", error=str(e))
@@ -403,11 +682,19 @@ class ProcessDiscoveryEngine:
             sc.distinct_values = values
             sc.cardinality = len(values)
 
-            # Low cardinality is a strong signal
+            # Low cardinality is a strong signal (data_enrichment weight=0.05)
             if sc.cardinality <= DISCOVERY_MAX_CARDINALITY:
                 proc.stages = values
                 proc.stage_counts = counts
-                proc.confidence = min(proc.confidence + 0.15, 1.0)
+                proc.evidence.append(Evidence(
+                    signal_type="data_enrichment",
+                    description=f"Status column '{sc.column_name}' has "
+                                f"{sc.cardinality} distinct values",
+                    strength=min(1.0 - sc.cardinality / DISCOVERY_MAX_CARDINALITY, 1.0),
+                    source_table=sc.table_name,
+                    source_column=sc.column_name,
+                ))
+                proc.confidence = min(proc.confidence + 0.05, 1.0)
             else:
                 # Too many values - probably not a status column
                 proc.confidence *= 0.3

@@ -4,6 +4,10 @@ import re
 
 import reflex as rx
 
+from biai.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
 from biai.ai.chart_builder import build_plotly_figure
 from biai.ai.echarts_builder import add_chart_annotations, build_echarts_option, can_use_echarts
 from biai.models.chart import ChartEngine
@@ -91,6 +95,8 @@ class ChatState(rx.State):
     # Schema training flag (lazy: trains on first query, retrains on schema change)
     _schema_trained: bool = False
     _trained_schema: str = ""
+    _training_failures: int = 0
+    _MAX_TRAINING_RETRIES: int = 2
 
     # Clear chat confirmation
     confirm_clear: bool = False
@@ -331,11 +337,56 @@ class ChatState(rx.State):
                     self._update_last_message(content="Training schema... (first query only)")
                 try:
                     await pipeline.train_schema()
-                except Exception:
-                    pass  # Training failure is non-fatal
-                async with self:
-                    self._schema_trained = True
-                    self._trained_schema = selected_schema
+                    async with self:
+                        self._schema_trained = True
+                        self._trained_schema = selected_schema
+                        self._training_failures = 0
+
+                    # Propagate discovered processes to ProcessMapState for auto-display
+                    try:
+                        from biai.ai.pipeline import _discovery_cache as discovery_cache
+                        from biai.state.process_map import ProcessMapState, ProcessInfo, EvidenceInfo
+                        cached_procs = discovery_cache.get(connector.config)
+                        if cached_procs:
+                            async with self:
+                                pms = await self.get_state(ProcessMapState)
+                            async with pms:
+                                if not pms.has_processes:
+                                    pms.discovered_processes = [
+                                        ProcessInfo(
+                                            id=p.id,
+                                            name=p.name,
+                                            description=getattr(p, "description", ""),
+                                            stages=[
+                                                s.name if hasattr(s, "name") else str(s)
+                                                for s in getattr(p, "stages", [])
+                                            ],
+                                            tables=getattr(p, "tables", []),
+                                            confidence=getattr(p, "confidence", 0.0),
+                                            evidence=[
+                                                EvidenceInfo(
+                                                    signal_type=e.signal_type,
+                                                    description=e.description,
+                                                    strength=e.strength,
+                                                )
+                                                for e in getattr(p, "evidence", [])
+                                            ],
+                                        )
+                                        for p in cached_procs
+                                    ]
+                                    pms.show_process_map = True
+                    except Exception:
+                        pass
+                except Exception as e:
+                    async with self:
+                        self._training_failures += 1
+                        if self._training_failures >= self._MAX_TRAINING_RETRIES:
+                            # Give up after max retries — mark trained to avoid blocking queries
+                            self._schema_trained = True
+                            self._trained_schema = selected_schema
+                            logger.warning("schema_training_gave_up", attempts=self._training_failures, error=str(e))
+                        else:
+                            logger.warning("schema_training_failed_retry", attempt=self._training_failures, error=str(e))
 
             # Build conversation context for multi-turn
             context = []
@@ -380,51 +431,56 @@ class ChatState(rx.State):
                         attempts=result.sql_query.generation_attempt,
                     )
 
-                # Build chart if recommended
+                # Build chart if recommended (wrapped to prevent TypeError crashes)
                 async with self:
                     chart_state = await self.get_state(ChartState)
-                if result.chart_config and result.df is not None:
-                    chart_built = False
-                    cfg = result.chart_config
+                try:
+                    if result.chart_config and result.df is not None:
+                        chart_built = False
+                        cfg = result.chart_config
 
-                    # Try ECharts for simple chart types
-                    if cfg.engine == ChartEngine.ECHARTS and can_use_echarts(cfg.chart_type):
-                        echarts_opt = build_echarts_option(cfg, result.df)
-                        if echarts_opt:
-                            # Auto-annotate bar/line/area charts
-                            echarts_opt = add_chart_annotations(echarts_opt, result.df)
-                            async with chart_state:
-                                chart_state.set_echarts(echarts_opt, cfg.title, len(result.df))
-                            chart_built = True
-
-                    # Fallback to Plotly
-                    if not chart_built:
-                        plotly_data, plotly_layout = build_plotly_figure(cfg, result.df)
-                        if plotly_data:
-                            async with chart_state:
-                                chart_state.set_plotly(plotly_data, plotly_layout, cfg.title)
-                            chart_built = True
-
-                    # Last resort: heuristic fallback
-                    if not chart_built:
-                        from biai.ai.chart_advisor import ChartAdvisor
-                        fallback = ChartAdvisor()._heuristic_recommend(result.df, question)
-                        if can_use_echarts(fallback.chart_type):
-                            echarts_opt = build_echarts_option(fallback, result.df)
+                        # Try ECharts for simple chart types
+                        if cfg.engine == ChartEngine.ECHARTS and can_use_echarts(cfg.chart_type):
+                            echarts_opt = build_echarts_option(cfg, result.df)
                             if echarts_opt:
+                                # Auto-annotate bar/line/area charts
                                 echarts_opt = add_chart_annotations(echarts_opt, result.df)
                                 async with chart_state:
-                                    chart_state.set_echarts(echarts_opt, fallback.title, len(result.df))
+                                    chart_state.set_echarts(echarts_opt, cfg.title, len(result.df))
                                 chart_built = True
+
+                        # Fallback to Plotly
                         if not chart_built:
-                            plotly_data, plotly_layout = build_plotly_figure(fallback, result.df)
+                            plotly_data, plotly_layout = build_plotly_figure(cfg, result.df)
                             if plotly_data:
                                 async with chart_state:
-                                    chart_state.set_plotly(plotly_data, plotly_layout, fallback.title)
-                            else:
-                                async with chart_state:
-                                    chart_state.clear_chart()
-                else:
+                                    chart_state.set_plotly(plotly_data, plotly_layout, cfg.title)
+                                chart_built = True
+
+                        # Last resort: heuristic fallback
+                        if not chart_built:
+                            from biai.ai.chart_advisor import ChartAdvisor
+                            fallback = ChartAdvisor()._heuristic_recommend(result.df, question)
+                            if can_use_echarts(fallback.chart_type):
+                                echarts_opt = build_echarts_option(fallback, result.df)
+                                if echarts_opt:
+                                    echarts_opt = add_chart_annotations(echarts_opt, result.df)
+                                    async with chart_state:
+                                        chart_state.set_echarts(echarts_opt, fallback.title, len(result.df))
+                                    chart_built = True
+                            if not chart_built:
+                                plotly_data, plotly_layout = build_plotly_figure(fallback, result.df)
+                                if plotly_data:
+                                    async with chart_state:
+                                        chart_state.set_plotly(plotly_data, plotly_layout, fallback.title)
+                                else:
+                                    async with chart_state:
+                                        chart_state.clear_chart()
+                    else:
+                        async with chart_state:
+                            chart_state.clear_chart()
+                except Exception as e:
+                    logger.warning("chart_build_failed", error=str(e))
                     async with chart_state:
                         chart_state.clear_chart()
 
@@ -454,6 +510,16 @@ class ChatState(rx.State):
                             total_instances=result.process_config.total_instances,
                         )
                     has_process = True
+
+                    # Build Sankey from process config edges (always available)
+                    try:
+                        from biai.ai.echarts_builder import build_sankey_from_process_config
+                        sankey = build_sankey_from_process_config(result.process_config)
+                        if sankey:
+                            async with process_state:
+                                process_state.set_sankey_timeline(sankey, {})
+                    except Exception as e:
+                        logger.debug("sankey_build_skipped", error=str(e))
                 else:
                     async with process_state:
                         process_state.clear_process()

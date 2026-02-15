@@ -8,13 +8,23 @@ from biai.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+class EvidenceInfo(BaseModel):
+    """Serializable evidence item for UI display."""
+    signal_type: str = ""
+    description: str = ""
+    strength: float = 0.0
+
+
 class ProcessInfo(BaseModel):
     """Serializable process info for rx.foreach rendering."""
     id: str = ""
     name: str = ""
     description: str = ""
     stages: list[str] = Field(default_factory=list)
+    tables: list[str] = Field(default_factory=list)
     confidence: float = 0.0
+    evidence: list[EvidenceInfo] = Field(default_factory=list)
+    domain: str = ""
 
 
 class ProcessMapState(rx.State):
@@ -98,18 +108,44 @@ class ProcessMapState(rx.State):
             )
             discovered = await engine.discover()
 
+            # Assign domain from graph communities
+            communities: dict[str, int] = {}
+            try:
+                from biai.ai.metadata_graph import SchemaGraph
+                graph = SchemaGraph(schema)
+                communities = graph.find_table_communities()
+            except Exception:
+                pass
+
             async with self:
                 if discovered:
-                    self.discovered_processes = [
-                        ProcessInfo(
-                            id=str(i),
+                    proc_infos = []
+                    for p in discovered:
+                        # Determine domain from community of main table
+                        domain = ""
+                        if communities and p.tables:
+                            main_table = p.tables[0].upper()
+                            community_id = communities.get(main_table, -1)
+                            if community_id >= 0:
+                                domain = f"Domain {community_id}"
+                        proc_infos.append(ProcessInfo(
+                            id=p.id,
                             name=p.name,
                             description=getattr(p, "description", ""),
                             stages=[s.name if hasattr(s, "name") else str(s) for s in getattr(p, "stages", [])],
+                            tables=getattr(p, "tables", []),
                             confidence=getattr(p, "confidence", 0.0),
-                        )
-                        for i, p in enumerate(discovered)
-                    ]
+                            evidence=[
+                                EvidenceInfo(
+                                    signal_type=e.signal_type,
+                                    description=e.description,
+                                    strength=e.strength,
+                                )
+                                for e in getattr(p, "evidence", [])
+                            ],
+                            domain=domain,
+                        ))
+                    self.discovered_processes = proc_infos
                     self.show_process_map = True
                     logger.info("process_map_discovery_done", count=len(discovered))
                 else:
@@ -130,6 +166,25 @@ class ProcessMapState(rx.State):
     def clear_selection(self):
         """Clear process selection."""
         self.selected_process_id = ""
+
+    @rx.var
+    def suggested_queries(self) -> list[str]:
+        """Generate suggested SQL questions for the selected process."""
+        if not self.selected_process_id:
+            return []
+        for p in self.discovered_processes:
+            if p.id == self.selected_process_id:
+                queries = []
+                if p.tables:
+                    main_table = p.tables[0]
+                    queries.append(f"Show all records from {main_table}")
+                if p.stages:
+                    queries.append(f"How many records are in each {p.name} stage?")
+                    queries.append(f"What is the average time between {p.name} stages?")
+                if len(p.tables) > 1:
+                    queries.append(f"Show {p.name} flow across {', '.join(p.tables[:3])}")
+                return queries
+        return []
 
     def hide_map(self):
         """Hide process map."""

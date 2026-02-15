@@ -43,11 +43,16 @@ class ProcessDetector:
         return any(kw in q_lower for kw in PROCESS_QUESTION_KEYWORDS)
 
     def detect_in_dataframe(self, df: pd.DataFrame, question: str) -> bool:
-        """Check if DataFrame contains process-like data."""
-        if df.empty or len(df) < 2:
+        """Check if DataFrame contains process-like data.
+
+        Requires minimum 5 rows and at least 2 positive signals to reduce
+        false positives on small or ambiguous datasets.
+        """
+        if df.empty or len(df) < 5:
             return False
 
         cols_lower = [c.lower() for c in df.columns]
+        signals = 0
 
         # Heuristic 1: from_status/to_status columns (transition log)
         has_transition = any(
@@ -55,8 +60,8 @@ class ProcessDetector:
             for c in cols_lower
         )
         if has_transition:
-            logger.debug("process_detected", heuristic="transition_columns")
-            return True
+            signals += 2  # Strong signal — counts as 2
+            logger.debug("process_signal", heuristic="transition_columns")
 
         # Heuristic 2: status/stage column + count/avg metric column
         has_status = any(
@@ -67,16 +72,22 @@ class ProcessDetector:
             any(p in c for p in ["count", "avg", "sum", "total", "mean"])
             for c in cols_lower
         )
-        if has_status and has_metric:
-            logger.debug("process_detected", heuristic="status_plus_metric")
-            return True
+        if has_status:
+            signals += 1
+            logger.debug("process_signal", heuristic="status_column")
+        if has_metric:
+            signals += 1
+            logger.debug("process_signal", heuristic="metric_column")
 
-        # Heuristic 3: question suggests process + data has >= 3 rows
-        if self.is_process_question(question) and len(df) >= 3:
-            logger.debug("process_detected", heuristic="question_keywords")
-            return True
+        # Heuristic 3: question suggests process
+        if self.is_process_question(question):
+            signals += 1
+            logger.debug("process_signal", heuristic="question_keywords")
 
-        return False
+        detected = signals >= 2
+        if detected:
+            logger.debug("process_detected", signals=signals)
+        return detected
 
     def detect_process_type(self, df: pd.DataFrame, sql: str) -> str:
         """Detect which type of process the data represents (legacy heuristic)."""

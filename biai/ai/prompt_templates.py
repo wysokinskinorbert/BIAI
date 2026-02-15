@@ -12,6 +12,9 @@ RULES:
 5. Use aliases for calculated columns to make results readable.
 6. Keep queries efficient - avoid SELECT * when specific columns are needed.
 7. Follow the dialect rules provided below.
+8. For count/distribution queries per status, stage, type, or category column, ALWAYS use GROUP BY.
+   Example: "how many X per status" → SELECT status, COUNT(*) AS cnt FROM table GROUP BY status ORDER BY cnt DESC.
+   NEVER use CASE WHEN to manually enumerate status values when GROUP BY achieves the same result.
 
 {dialect_rules}
 """

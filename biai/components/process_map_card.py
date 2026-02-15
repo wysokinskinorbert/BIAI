@@ -2,7 +2,14 @@
 
 import reflex as rx
 
-from biai.state.process_map import ProcessMapState, ProcessInfo
+from biai.state.process_map import ProcessMapState, ProcessInfo, EvidenceInfo
+from biai.state.chat import ChatState
+
+# Domain colors for visual grouping
+_DOMAIN_COLORS = [
+    "var(--blue-9)", "var(--green-9)", "var(--orange-9)",
+    "var(--purple-9)", "var(--red-9)", "var(--cyan-9)",
+]
 
 
 def process_map_card() -> rx.Component:
@@ -83,10 +90,72 @@ def process_map_card() -> rx.Component:
                 ),
             ),
 
+            # Drill-down panel for selected process
+            rx.cond(
+                ProcessMapState.selected_process_id != "",
+                rx.box(
+                    rx.vstack(
+                        rx.hstack(
+                            rx.icon("info", size=14, color="var(--accent-9)"),
+                            rx.text("Suggested Queries", size="2", weight="bold"),
+                            rx.spacer(),
+                            rx.icon_button(
+                                rx.icon("x", size=12),
+                                variant="ghost",
+                                size="1",
+                                on_click=ProcessMapState.clear_selection,
+                            ),
+                            width="100%",
+                            align="center",
+                        ),
+                        rx.foreach(
+                            ProcessMapState.suggested_queries,
+                            _suggested_query_item,
+                        ),
+                        spacing="2",
+                        width="100%",
+                    ),
+                    padding="12px",
+                    border_top="1px solid var(--gray-a5)",
+                    bg="var(--gray-a2)",
+                    border_radius="0 0 8px 8px",
+                ),
+            ),
+
             width="100%",
             spacing="3",
         ),
         width="100%",
+    )
+
+
+def _suggested_query_item(query: rx.Var[str]) -> rx.Component:
+    """Clickable suggested query chip — sends query to chat."""
+    return rx.button(
+        rx.icon("message-circle", size=12),
+        query,
+        variant="outline",
+        size="1",
+        style={"justify_content": "flex-start", "text_align": "left"},
+        width="100%",
+        on_click=ChatState.run_suggested_query(query),
+    )
+
+
+def _evidence_item(evidence: EvidenceInfo) -> rx.Component:
+    """Single evidence signal badge."""
+    return rx.tooltip(
+        rx.badge(
+            evidence.signal_type,
+            variant="outline",
+            size="1",
+            color_scheme=rx.cond(
+                evidence.strength >= 0.7,
+                "green",
+                rx.cond(evidence.strength >= 0.4, "yellow", "gray"),
+            ),
+        ),
+        content=evidence.description,
     )
 
 
@@ -106,8 +175,20 @@ def _process_card_item(process: ProcessInfo) -> rx.Component:
                     weight="bold",
                     trim="both",
                 ),
+                rx.spacer(),
+                # Confidence badge
+                rx.cond(
+                    process.confidence >= 0.7,
+                    rx.badge("High", color_scheme="green", size="1"),
+                    rx.cond(
+                        process.confidence >= 0.5,
+                        rx.badge("Medium", color_scheme="yellow", size="1"),
+                        rx.badge("Low", color_scheme="orange", size="1"),
+                    ),
+                ),
                 align="center",
                 spacing="2",
+                width="100%",
             ),
             rx.cond(
                 process.description != "",
@@ -117,6 +198,15 @@ def _process_card_item(process: ProcessInfo) -> rx.Component:
                     color="var(--gray-10)",
                     trim="both",
                     style={"max_height": "40px", "overflow": "hidden"},
+                ),
+            ),
+            # Evidence signals
+            rx.cond(
+                process.evidence.length() > 0,
+                rx.flex(
+                    rx.foreach(process.evidence, _evidence_item),
+                    wrap="wrap",
+                    spacing="1",
                 ),
             ),
             rx.hstack(
@@ -130,12 +220,24 @@ def _process_card_item(process: ProcessInfo) -> rx.Component:
                     size="1",
                 ),
                 rx.cond(
-                    process.confidence >= 0.7,
-                    rx.badge("High", color_scheme="green", size="1"),
-                    rx.cond(
-                        process.confidence >= 0.5,
-                        rx.badge("Medium", color_scheme="yellow", size="1"),
-                        rx.badge("Low", color_scheme="orange", size="1"),
+                    process.tables.length() > 0,
+                    rx.badge(
+                        rx.text(
+                            process.tables.length(),
+                            " tables",
+                            size="1",
+                        ),
+                        variant="surface",
+                        size="1",
+                    ),
+                ),
+                rx.cond(
+                    process.domain != "",
+                    rx.badge(
+                        process.domain,
+                        variant="outline",
+                        size="1",
+                        color_scheme="blue",
                     ),
                 ),
                 spacing="2",
@@ -145,7 +247,7 @@ def _process_card_item(process: ProcessInfo) -> rx.Component:
         style={
             "cursor": "pointer",
             "min_width": "180px",
-            "max_width": "260px",
+            "max_width": "280px",
             "flex": "1 1 180px",
             "&:hover": {
                 "border_color": "var(--accent-8)",

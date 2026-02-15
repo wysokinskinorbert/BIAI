@@ -16,6 +16,7 @@ from biai.components.react_flow.process_flow import process_flow_card
 from biai.components.react_flow.process_comparison import process_comparison_card
 from biai.components.process_map_card import process_map_card
 from biai.components.erd_diagram import erd_card
+from biai.components.schema_graph_card import schema_graph_card
 from biai.state.pinned import PinnedState
 from biai.state.dashboard import DashboardState
 from biai.components.echarts.wrapper import echarts_component
@@ -188,6 +189,60 @@ def dashboard_panel() -> rx.Component:
                         width="100%",
                     ),
 
+                    # Sankey diagram (transition flow from event log)
+                    rx.box(
+                        rx.card(
+                            rx.vstack(
+                                rx.hstack(
+                                    rx.icon("git-merge", size=16, color="var(--accent-9)"),
+                                    rx.text("Transition Flow", size="3", weight="bold"),
+                                    width="100%",
+                                    align="center",
+                                ),
+                                rx.box(
+                                    echarts_component(
+                                        option=ProcessState.sankey_option,
+                                        not_merge=True,
+                                    ),
+                                    width="100%",
+                                    height="350px",
+                                ),
+                                width="100%",
+                                spacing="3",
+                            ),
+                            width="100%",
+                        ),
+                        display=rx.cond(ProcessState.show_sankey, "block", "none"),
+                        width="100%",
+                    ),
+
+                    # Timeline scatter (events over time)
+                    rx.box(
+                        rx.card(
+                            rx.vstack(
+                                rx.hstack(
+                                    rx.icon("clock", size=16, color="var(--accent-9)"),
+                                    rx.text("Event Timeline", size="3", weight="bold"),
+                                    width="100%",
+                                    align="center",
+                                ),
+                                rx.box(
+                                    echarts_component(
+                                        option=ProcessState.timeline_option,
+                                        not_merge=True,
+                                    ),
+                                    width="100%",
+                                    height="300px",
+                                ),
+                                width="100%",
+                                spacing="3",
+                            ),
+                            width="100%",
+                        ),
+                        display=rx.cond(ProcessState.show_timeline, "block", "none"),
+                        width="100%",
+                    ),
+
                     # Data table
                     data_table(),
 
@@ -195,6 +250,17 @@ def dashboard_panel() -> rx.Component:
                     rx.box(
                         sql_viewer(),
                         display=rx.cond(QueryState.current_sql != "", "block", "none"),
+                        width="100%",
+                    ),
+
+                    # Schema topology graph (always available when discovered)
+                    rx.box(
+                        schema_graph_card(),
+                        display=rx.cond(
+                            SchemaState.show_schema_graph,
+                            "block",
+                            "none",
+                        ),
                         width="100%",
                     ),
 

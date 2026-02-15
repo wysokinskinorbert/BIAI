@@ -6,7 +6,9 @@ from typing import Any
 import pandas as pd
 
 from biai.models.connection import ConnectionConfig
-from biai.models.schema import TableInfo, SchemaSnapshot
+from biai.models.schema import (
+    TableInfo, SchemaSnapshot, TriggerInfo, ProcedureInfo, DependencyInfo,
+)
 from biai.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -54,6 +56,18 @@ class DatabaseConnector(ABC):
     @abstractmethod
     async def get_server_version(self) -> str:
         """Get database server version string."""
+
+    async def get_triggers(self, schema: str = "") -> list[TriggerInfo]:
+        """Get triggers on tables. Override in subclasses for DB-specific logic."""
+        return []
+
+    async def get_procedures(self, schema: str = "") -> list[ProcedureInfo]:
+        """Get stored procedures/functions. Override in subclasses."""
+        return []
+
+    async def get_dependencies(self, schema: str = "") -> list[DependencyInfo]:
+        """Get object dependencies (proc→table). Override in subclasses."""
+        return []
 
     async def __aenter__(self):
         await self.connect()

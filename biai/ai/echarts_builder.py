@@ -9,7 +9,7 @@ ECHARTS_TYPES = {
     ChartType.BAR, ChartType.LINE, ChartType.PIE, ChartType.SCATTER,
     ChartType.AREA, ChartType.HEATMAP, ChartType.GAUGE, ChartType.FUNNEL,
     ChartType.WATERFALL, ChartType.TREEMAP, ChartType.SUNBURST,
-    ChartType.RADAR, ChartType.PARALLEL,
+    ChartType.RADAR, ChartType.PARALLEL, ChartType.SANKEY,
 }
 
 # Dark theme colors matching the Plotly dark theme
@@ -28,6 +28,9 @@ def build_echarts_option(config: ChartConfig, df: pd.DataFrame) -> dict:
     """
     if config.chart_type == ChartType.TABLE:
         return {}
+
+    if config.chart_type == ChartType.SANKEY:
+        return _build_sankey(config, df)
 
     if config.chart_type == ChartType.PIE:
         return _build_pie(config, df)
@@ -965,5 +968,326 @@ def _build_pie(config: ChartConfig, df: pd.DataFrame) -> dict:
             "label": {"show": True, "fontSize": 14, "fontWeight": "bold"},
         },
         "data": pie_data,
+    }]
+    return option
+
+
+def _build_sankey(config: ChartConfig, df: pd.DataFrame) -> dict:
+    """Build ECharts Sankey from DataFrame with source/target/value columns."""
+    cols = [c.lower() for c in df.columns]
+
+    src_col = next(
+        (c for c in df.columns if any(p in c.lower() for p in ["source", "from"])),
+        None,
+    )
+    tgt_col = next(
+        (c for c in df.columns if any(p in c.lower() for p in ["target", "to"])),
+        None,
+    )
+    val_col = next(
+        (c for c in df.columns if any(p in c.lower() for p in ["value", "count", "weight"])),
+        None,
+    )
+
+    if not src_col or not tgt_col:
+        return {}
+
+    nodes_set: set[str] = set()
+    links = []
+    for _, row in df.iterrows():
+        s = str(row[src_col])
+        t = str(row[tgt_col])
+        v = float(row[val_col]) if val_col and val_col in df.columns and pd.notna(row[val_col]) else 1
+        nodes_set.add(s)
+        nodes_set.add(t)
+        links.append({"source": s, "target": t, "value": v})
+
+    nodes = [{"name": n} for n in sorted(nodes_set)]
+    return _build_sankey_option(config.title, nodes, links)
+
+
+def build_sankey_from_event_log(event_log, title: str = "") -> dict:
+    """Build ECharts Sankey option directly from an EventLog instance.
+
+    Uses get_transition_matrix() for links and get_activities() for node ordering.
+    """
+    from biai.models.event_log import EventLog
+
+    if not isinstance(event_log, EventLog) or not event_log.events:
+        return {}
+
+    transition_matrix = event_log.get_transition_matrix()
+    if not transition_matrix:
+        return {}
+
+    activities = event_log.get_activities()
+    nodes = [{"name": a} for a in activities]
+
+    links = []
+    for (fr, to), count in transition_matrix.items():
+        links.append({"source": fr, "target": to, "value": count})
+
+    return _build_sankey_option(
+        title or f"Process Flow: {event_log.process_id}",
+        nodes,
+        links,
+    )
+
+
+def build_sankey_from_process_config(process_config) -> dict:
+    """Build ECharts Sankey from ProcessFlowConfig edges.
+
+    Uses process_config.edges (which have source, target, count) to build
+    a Sankey transition flow. This works regardless of whether a DiscoveredProcess
+    was matched — it uses the already-computed process graph data.
+
+    ECharts Sankey requires a DAG (no cycles). Process flows often have cycles
+    (e.g. resolved→reopened→investigating). Back-edges are handled by suffixing
+    the target with " (return)" to create a separate node that breaks the cycle.
+    """
+    if not process_config or not process_config.edges:
+        return {}
+
+    # Map node IDs to labels
+    id_to_label = {}
+    for node in process_config.nodes:
+        id_to_label[node.id] = node.label
+
+    # Collect raw edges
+    raw_edges: list[tuple[str, str, int]] = []
+    for edge in process_config.edges:
+        src = id_to_label.get(edge.source, edge.source)
+        tgt = id_to_label.get(edge.target, edge.target)
+        value = edge.count if edge.count and edge.count > 0 else 1
+        raw_edges.append((src, tgt, value))
+
+    # Break cycles: compute topological order, rename back-edge targets
+    nodes_set, links = _break_sankey_cycles(raw_edges)
+
+    if not links:
+        return {}
+
+    nodes = [{"name": n} for n in sorted(nodes_set)]
+    return _build_sankey_option(
+        f"Transition Flow: {process_config.title}" if process_config.title else "Transition Flow",
+        nodes,
+        links,
+    )
+
+
+def _break_sankey_cycles(
+    edges: list[tuple[str, str, int]],
+) -> tuple[set[str], list[dict]]:
+    """Break cycles in edges for Sankey DAG requirement.
+
+    Uses DFS to detect back-edges. Back-edges get their target renamed
+    to "target (return)" to create a separate node that breaks the cycle
+    while preserving the transition information.
+    """
+    # Build adjacency list
+    graph: dict[str, set[str]] = {}
+    all_nodes: set[str] = set()
+    for src, tgt, _ in edges:
+        graph.setdefault(src, set()).add(tgt)
+        all_nodes.add(src)
+        all_nodes.add(tgt)
+
+    # Compute topological order via DFS (Kahn-like BFS fallback)
+    order: dict[str, int] = {}
+    visited: set[str] = set()
+    temp: set[str] = set()
+    back_edges: set[tuple[str, str]] = set()
+    counter = [0]
+
+    def dfs(node: str) -> None:
+        if node in temp:
+            return  # cycle detected, skip
+        if node in visited:
+            return
+        temp.add(node)
+        for neighbor in graph.get(node, []):
+            if neighbor in temp:
+                back_edges.add((node, neighbor))
+            elif neighbor not in visited:
+                dfs(neighbor)
+        temp.discard(node)
+        visited.add(node)
+        order[node] = counter[0]
+        counter[0] += 1
+
+    for node in all_nodes:
+        if node not in visited:
+            dfs(node)
+
+    # Build links, renaming back-edge targets
+    nodes_set: set[str] = set()
+    links: list[dict] = []
+    for src, tgt, value in edges:
+        if (src, tgt) in back_edges:
+            renamed = f"{tgt} (return)"
+            nodes_set.add(src)
+            nodes_set.add(renamed)
+            links.append({"source": src, "target": renamed, "value": value})
+        else:
+            nodes_set.add(src)
+            nodes_set.add(tgt)
+            links.append({"source": src, "target": tgt, "value": value})
+
+    return nodes_set, links
+
+
+def _build_sankey_option(title: str, nodes: list[dict], links: list[dict]) -> dict:
+    """Build ECharts Sankey option from prepared nodes/links."""
+    option = _base_option(title)
+    option["tooltip"] = {
+        "trigger": "item",
+        "triggerOn": "mousemove",
+    }
+    option["series"] = [{
+        "type": "sankey",
+        "data": nodes,
+        "links": links,
+        "emphasis": {"focus": "adjacency"},
+        "lineStyle": {"color": "gradient", "curveness": 0.5},
+        "label": {"color": "#ccc", "fontSize": 12},
+        "itemStyle": {"borderWidth": 1, "borderColor": "#1a1a2e"},
+        "nodeGap": 12,
+        "layoutIterations": 32,
+    }]
+    return option
+
+
+def build_schema_graph_option(
+    table_columns: dict[str, list[dict[str, str]]],
+    hub_tables: list[dict[str, str]],
+    communities: dict[str, int] | None = None,
+) -> dict:
+    """Build ECharts force-directed graph showing schema table topology.
+
+    Args:
+        table_columns: {table_name: [{name, data_type, is_pk, is_fk, fk_ref}]}
+        hub_tables: [{name, degree}] — hub tables from graph analysis
+        communities: {TABLE_NAME_UPPER: community_id} — from SchemaGraph
+    """
+    if not table_columns:
+        return {}
+
+    communities = communities or {}
+    hub_names = {h["name"].upper() for h in hub_tables} if hub_tables else set()
+
+    # Determine number of distinct communities for categories
+    community_ids = set(communities.values()) if communities else {0}
+    categories = [{"name": f"Domain {i}"} for i in sorted(community_ids)]
+    if not categories:
+        categories = [{"name": "Domain 0"}]
+
+    nodes = []
+    links = []
+
+    for table_name, cols in table_columns.items():
+        # Calculate FK degree (outgoing)
+        out_degree = sum(1 for c in cols if c.get("is_fk") == "1")
+        # Calculate incoming degree (other tables referencing this one)
+        in_degree = 0
+        for other_name, other_cols in table_columns.items():
+            if other_name == table_name:
+                continue
+            for c in other_cols:
+                fk_ref = c.get("fk_ref", "")
+                ref_table = fk_ref.split(".")[-1] if fk_ref else ""
+                if ref_table and ref_table.upper() == table_name.upper():
+                    in_degree += 1
+
+        total_degree = out_degree + in_degree
+        is_hub = table_name.upper() in hub_names
+        community_id = communities.get(table_name.upper(), 0)
+
+        node: dict = {
+            "name": table_name,
+            "symbolSize": min(10 + total_degree * 5, 50),
+            "category": community_id,
+            "value": total_degree,
+        }
+        if is_hub:
+            node["itemStyle"] = {"borderWidth": 3, "borderColor": "#fac858"}
+        nodes.append(node)
+
+        # Build edges from FK refs
+        for c in cols:
+            fk_ref = c.get("fk_ref", "")
+            ref_table = fk_ref.split(".")[-1] if fk_ref else ""
+            if ref_table:
+                links.append({"source": table_name, "target": ref_table})
+
+    option = _base_option("Schema Topology")
+    option["tooltip"] = {"trigger": "item"}
+    if len(categories) > 1:
+        option["legend"] = [
+            {"data": [c["name"] for c in categories], "textStyle": {"color": "#ccc"}, "bottom": 0}
+        ]
+    option["series"] = [{
+        "type": "graph",
+        "layout": "force",
+        "data": nodes,
+        "links": links,
+        "categories": categories,
+        "roam": True,
+        "draggable": True,
+        "force": {"repulsion": 200, "edgeLength": [50, 150]},
+        "label": {"show": True, "color": "#ccc", "fontSize": 10},
+        "lineStyle": {"color": "source", "curveness": 0.1, "opacity": 0.6},
+        "emphasis": {"focus": "adjacency", "lineStyle": {"width": 3}},
+    }]
+    return option
+
+
+def build_timeline_from_event_log(event_log, title: str = "") -> dict:
+    """Build ECharts scatter timeline from EventLog with timestamps.
+
+    X axis = time, Y axis = activity, each point = one event.
+    Only useful when EventLog has timestamps.
+    """
+    from biai.models.event_log import EventLog
+
+    if not isinstance(event_log, EventLog) or not event_log.events:
+        return {}
+
+    # Filter events with timestamps
+    timed_events = [e for e in event_log.events if e.timestamp is not None]
+    if not timed_events:
+        return {}
+
+    activities = event_log.get_activities()
+    activity_idx = {a: i for i, a in enumerate(activities)}
+
+    data_points = []
+    for e in timed_events:
+        ts = e.timestamp.isoformat() if e.timestamp else ""
+        y = activity_idx.get(e.activity, 0)
+        data_points.append([ts, y, e.case_id])
+
+    option = _base_option(title or f"Timeline: {event_log.process_id}")
+    option["tooltip"] = {
+        "trigger": "item",
+        "formatter": "{@[2]}: {@[1]}",
+    }
+    option["xAxis"] = {
+        "type": "time",
+        "axisLabel": {"color": "#999"},
+        "axisLine": {"lineStyle": {"color": "#555"}},
+    }
+    option["yAxis"] = {
+        "type": "category",
+        "data": activities,
+        "axisLabel": {"color": "#999"},
+        "axisLine": {"lineStyle": {"color": "#555"}},
+    }
+    option["grid"] = {"left": "15%", "right": "5%", "bottom": "15%", "top": "15%"}
+    option["series"] = [{
+        "type": "scatter",
+        "data": data_points,
+        "symbolSize": 8,
+        "encode": {"x": 0, "y": 1, "tooltip": [0, 2]},
+        "itemStyle": {"opacity": 0.7},
     }]
     return option

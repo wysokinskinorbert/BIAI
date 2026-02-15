@@ -45,6 +45,7 @@ class PipelineResult:
         self.query_error: QueryError | None = None
         self.chart_config: ChartConfig | None = None
         self.process_config: ProcessFlowConfig | None = None
+        self.discovered_process: "DiscoveredProcess | None" = None
         self.description: str = ""
         self.errors: list[str] = []
         self.df: pd.DataFrame | None = None
@@ -124,13 +125,121 @@ class AIPipeline:
     def schema_manager(self) -> SchemaManager:
         return self._schema_manager
 
+    async def discover_context(
+        self,
+        schemas: list[str] | None = None,
+        on_step: object | None = None,
+    ) -> "BusinessContext":
+        """Progressive context discovery pipeline.
+
+        Steps (with incremental updates via on_step callback):
+        1. Schema snapshot → immediate
+        2. SchemaGraph build + analysis → ~1-3s
+        3. ProcessDiscovery → ~3-8s
+        4. Selective profiling (only candidate tables) → parallel
+        5. BusinessGlossary (LLM) → ~5-15s
+
+        Args:
+            schemas: List of schemas to analyze (None = current schema).
+            on_step: Optional async callback(step_name, partial_context).
+
+        Returns:
+            BusinessContext with all discovered data.
+        """
+        import time
+        from biai.models.context import BusinessContext
+        from biai.ai.metadata_graph import SchemaGraph
+
+        start = time.time()
+        ctx = BusinessContext()
+
+        # Step 1: Schema snapshot
+        if schemas and len(schemas) > 1:
+            snapshot = await self._schema_manager.get_unified_snapshot(schemas)
+        else:
+            schema = schemas[0] if schemas else self._schema_name
+            snapshot = await self._schema_manager.get_snapshot(schema=schema)
+        ctx.schema = snapshot
+        logger.info("context_step_1_schema", tables=len(snapshot.tables))
+
+        # Step 2: Graph analysis
+        graph = SchemaGraph(snapshot)
+        stats = graph.get_stats()
+        ctx.hub_tables = stats.hub_tables
+        ctx.connected_components = stats.connected_components
+        ctx.star_schemas = [
+            {"fact_table": s.fact_table, "dimensions": s.dimension_tables, "fk_count": s.fk_count}
+            for s in stats.star_schemas
+        ]
+        ctx.bridge_tables = stats.bridge_tables
+        ctx.cross_schema_edges = stats.cross_schema_edges
+        ctx.table_communities = graph.find_table_communities()
+        logger.info(
+            "context_step_2_graph",
+            hubs=len(ctx.hub_tables),
+            components=ctx.connected_components,
+            communities=len(set(ctx.table_communities.values())),
+        )
+
+        # Step 3: Process discovery
+        try:
+            cached = _discovery_cache.get(self._connector.config)
+            if cached is not None:
+                ctx.processes = cached
+            else:
+                engine = ProcessDiscoveryEngine(
+                    self._connector, snapshot,
+                    ollama_host=self._ollama_host,
+                    ollama_model=self._ollama_model,
+                    schema_name=snapshot.schema_name if snapshot.schema_name != "USER" else "",
+                )
+                ctx.processes = await engine.discover()
+                _discovery_cache.store(self._connector.config, ctx.processes)
+            logger.info("context_step_3_discovery", processes=len(ctx.processes))
+        except Exception as e:
+            logger.warning("context_step_3_failed", error=str(e))
+
+        # Step 4: Selective profiling (only candidate process tables)
+        try:
+            candidate_tables = set()
+            for proc in ctx.processes:
+                candidate_tables.update(t.upper() for t in proc.tables)
+            tables_to_profile = [
+                t for t in snapshot.tables
+                if t.name.upper() in candidate_tables
+            ]
+            if tables_to_profile:
+                from biai.ai.data_profiler import DataProfiler
+                profiler = DataProfiler(self._connector)
+                profiles = await profiler.profile_tables_batch(
+                    tables_to_profile, concurrency=10, timeout=60.0,
+                )
+                ctx.profiles = {k: v.model_dump() for k, v in profiles.items()}
+                logger.info("context_step_4_profiling", profiled=len(ctx.profiles))
+        except Exception as e:
+            logger.warning("context_step_4_failed", error=str(e))
+
+        elapsed_ms = int((time.time() - start) * 1000)
+        ctx.discovery_duration_ms = elapsed_ms
+        ctx.discovered_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        logger.info("context_discovery_complete", duration_ms=elapsed_ms)
+
+        return ctx
+
     async def train_schema(self) -> dict[str, int]:
         """Train Vanna with current database schema."""
         # Reset collections to avoid corrupted HNSW indices from previous sessions
         self._vanna.reset_collections()
         snapshot = await self._schema_manager.get_snapshot(schema=self._schema_name)
-        # Generate docs and examples from actual schema (real column names)
-        docs = DialectHelper.get_documentation(snapshot)
+        # Generate docs and examples — auto-select detail level for large schemas
+        table_count = len(snapshot.tables)
+        if table_count > 200:
+            # Large schema: overview only, relevant tables added after discovery
+            detail_level = "overview"
+            logger.info("train_schema_overview_mode", tables=table_count)
+        else:
+            detail_level = "full"
+        docs = DialectHelper.get_documentation(snapshot, detail_level=detail_level)
         examples = DialectHelper.get_examples(self._db_type, schema=snapshot)
         is_oracle = self._db_type == DBType.ORACLE
 
@@ -160,6 +269,26 @@ class AIPipeline:
             except Exception as e:
                 logger.warning("dynamic_discovery_failed", error=str(e))
 
+        # For large schemas in overview mode: add relevant table details
+        if detail_level == "overview" and self._discovered_processes:
+            relevant = set()
+            for proc in self._discovered_processes:
+                relevant.update(proc.tables)
+            if relevant:
+                relevant_docs = DialectHelper.get_documentation(
+                    snapshot, detail_level="relevant",
+                    relevant_tables=list(relevant),
+                )
+                # Replace overview docs with relevant docs (more targeted)
+                docs = relevant_docs + docs[len(DialectHelper.get_documentation(snapshot, detail_level="overview")):]
+                logger.info("train_schema_relevant_enriched", relevant_tables=len(relevant))
+
+        # Enrich with graph topology context
+        try:
+            docs.extend(self._build_graph_context_docs(snapshot))
+        except Exception as e:
+            logger.debug("graph_context_docs_skipped", error=str(e))
+
         # Fallback: add legacy process-specific training data
         if not self._discovered_processes and has_process_tables(snapshot):
             docs.extend(get_process_documentation(snapshot))
@@ -178,6 +307,61 @@ class AIPipeline:
             logger.warning("distinct_values_discovery_failed", error=str(e))
 
         return self._trainer.train_full(schema=snapshot, docs=docs, examples=examples)
+
+    def _build_graph_context_docs(self, snapshot) -> list[str]:
+        """Build documentation from schema graph topology for LLM context.
+
+        Includes hub tables, star schemas, and cross-schema relationships
+        to help LLM understand the database structure for better SQL generation.
+        """
+        from biai.ai.metadata_graph import SchemaGraph
+
+        graph = SchemaGraph(snapshot)
+        stats = graph.get_stats()
+        docs: list[str] = []
+
+        # Hub tables (most connected)
+        if stats.hub_tables:
+            hub_lines = [f"  - {name} ({degree} FK references)" for name, degree in stats.hub_tables[:10]]
+            docs.append(
+                "DATABASE TOPOLOGY - Hub Tables (most referenced tables, likely central entities):\n"
+                + "\n".join(hub_lines)
+            )
+
+        # Star schemas
+        if stats.star_schemas:
+            for ss in stats.star_schemas[:5]:
+                dims = ", ".join(ss.dimension_tables[:6])
+                docs.append(
+                    f"STAR SCHEMA: Fact table '{ss.fact_table}' "
+                    f"with dimension tables: {dims}. "
+                    f"Use JOINs between {ss.fact_table} and dimensions for analytical queries."
+                )
+
+        # Process relationships
+        if self._discovered_processes:
+            for proc in self._discovered_processes[:10]:
+                tables_str = ", ".join(proc.tables[:5])
+                stages_str = " -> ".join(proc.stages[:8]) if proc.stages else "unknown stages"
+                docs.append(
+                    f"BUSINESS PROCESS '{proc.name}': "
+                    f"Tables: {tables_str}. "
+                    f"Flow: {stages_str}. "
+                    f"Confidence: {proc.confidence:.0%}."
+                )
+
+        # Cross-schema hints
+        if stats.cross_schema_edges > 0:
+            cross_edges = graph.get_cross_schema_edges()
+            for edge in cross_edges[:5]:
+                docs.append(
+                    f"CROSS-SCHEMA RELATIONSHIP: {edge.source_table} -> {edge.target_table} "
+                    f"(FK: {edge.source_column} references {edge.target_column})"
+                )
+
+        if docs:
+            logger.info("graph_context_docs_added", count=len(docs))
+        return docs
 
     async def _discover_distinct_values(
         self, columns: list[tuple[str, str]], max_values: int = 30,
@@ -429,6 +613,7 @@ class AIPipeline:
             result.process_config = builder.build(
                 result.df, process_type, question, discovered=discovered,
             )
+            result.discovered_process = discovered
             if result.process_config:
                 logger.info(
                     "process_detected",

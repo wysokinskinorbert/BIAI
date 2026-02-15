@@ -5,6 +5,7 @@ from __future__ import annotations
 import pandas as pd
 
 from biai.models.discovery import DiscoveredProcess
+from biai.models.event_log import EventLog
 from biai.models.process import (
     ProcessNode,
     ProcessEdge,
@@ -32,8 +33,21 @@ class ProcessGraphBuilder:
         process_type: str,
         question: str,
         discovered: DiscoveredProcess | None = None,
+        event_log: EventLog | None = None,
     ) -> ProcessFlowConfig | None:
-        """Build process flow from data."""
+        """Build process flow from data.
+
+        Strategy priority:
+        0. Event log (real transitions from data — highest quality)
+        1. Transition columns in DataFrame
+        2. Aggregate columns in DataFrame
+        3. Discovered process stages
+        """
+        # Strategy 0: Event log (real transitions confirmed by data)
+        if event_log and event_log.events:
+            logger.info("process_build_strategy", strategy="event_log")
+            return self._build_from_event_log(event_log, question, discovered)
+
         # Strategy 1: Transition log data (from_status, to_status)
         if self._has_transition_columns(df):
             logger.info("process_build_strategy", strategy="transitions")
@@ -51,6 +65,99 @@ class ProcessGraphBuilder:
 
         logger.warning("process_build_no_strategy", process_type=process_type)
         return None
+
+    def _build_from_event_log(
+        self,
+        event_log: EventLog,
+        question: str,
+        discovered: DiscoveredProcess | None = None,
+    ) -> ProcessFlowConfig | None:
+        """Build graph from EventLog transition matrix.
+
+        Uses real transition counts as edge weights. Edge thickness is
+        proportional to transition frequency. Replaces synthetic edges.
+        """
+        from biai.ai.dynamic_styler import DynamicStyler
+
+        transition_matrix = event_log.get_transition_matrix()
+        if not transition_matrix:
+            return None
+
+        # Collect all activities
+        activities: set[str] = set()
+        for (fr, to), _ in transition_matrix.items():
+            activities.add(fr)
+            activities.add(to)
+
+        # Order activities using discovered stages if available
+        ordered = self._order_states(activities, discovered)
+
+        # Determine start/end nodes
+        sources = {fr for fr, _ in transition_matrix.keys()}
+        targets = {to for _, to in transition_matrix.keys()}
+        start_candidates = sources - targets
+        end_candidates = targets - sources
+
+        # Build nodes
+        nodes: list[ProcessNode] = []
+        max_count = max(transition_matrix.values()) if transition_matrix else 1
+
+        for activity in ordered:
+            if activity in start_candidates:
+                node_type = ProcessNodeType.START
+            elif activity in end_candidates:
+                node_type = ProcessNodeType.END
+            else:
+                node_type = ProcessNodeType.TASK
+
+            label = activity
+            if discovered:
+                label = discovered.get_label(activity)
+
+            color = DynamicStyler.get_color(activity)
+            if discovered:
+                custom = discovered.get_stage_color(activity)
+                if custom:
+                    color = custom
+
+            icon = DynamicStyler.get_icon(activity)
+            if discovered:
+                custom_icon = discovered.get_stage_icon(activity)
+                if custom_icon:
+                    icon = custom_icon
+
+            nodes.append(ProcessNode(
+                id=activity,
+                label=label,
+                node_type=node_type,
+                color=color,
+                icon=icon,
+            ))
+
+        # Build edges with weights from transition matrix
+        edges: list[ProcessEdge] = []
+        for (fr, to), count in transition_matrix.items():
+            # Normalize thickness 1-5
+            thickness = max(1, min(5, int(count / max_count * 5)))
+            edge_type = ProcessEdgeType.ANIMATED if count > max_count * 0.3 else ProcessEdgeType.NORMAL
+
+            edges.append(ProcessEdge(
+                id=f"e-{fr}-{to}",
+                source=fr,
+                target=to,
+                label=str(count),
+                edge_type=edge_type,
+                animated=edge_type == ProcessEdgeType.ANIMATED,
+            ))
+
+        if not nodes:
+            return None
+
+        return ProcessFlowConfig(
+            nodes=nodes,
+            edges=edges,
+            title=question[:80] if question else event_log.process_id,
+        )
 
     def _has_transition_columns(self, df: pd.DataFrame) -> bool:
         cols = [c.lower() for c in df.columns]
@@ -263,7 +370,7 @@ class ProcessGraphBuilder:
                 metadata=metadata,
             ))
 
-        # Build sequential edges
+        # Build sequential edges (suggested — not confirmed by transition data)
         edges = []
         for i in range(len(ordered) - 1):
             src = ordered[i]
@@ -272,7 +379,8 @@ class ProcessGraphBuilder:
                 id=f"{src}->{tgt}",
                 source=src,
                 target=tgt,
-                edge_type=ProcessEdgeType.ANIMATED,
+                edge_type=ProcessEdgeType.DIMMED,
+                label="suggested",
             ))
 
         # Add branches from discovered process
@@ -405,7 +513,7 @@ class ProcessGraphBuilder:
         states: set[str],
         discovered: DiscoveredProcess | None = None,
     ) -> list[str]:
-        """Order states using discovered sequence or alphabetically.
+        """Order states using discovered sequence or lifecycle heuristic.
 
         Args:
             states: Set of state names found in data.
@@ -417,4 +525,91 @@ class ProcessGraphBuilder:
             ordered = [s for s in known if s in str_states]
             remaining = [s for s in str_states if s not in known]
             return ordered + sorted(remaining)
-        return sorted(str(s) for s in states)
+        # Heuristic ordering based on common business process lifecycle patterns
+        # Tiebreaker: alphabetical order when scores are equal
+        return sorted(
+            (str(s) for s in states),
+            key=lambda s: (_stage_order_score(s), s.lower()),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Heuristic lifecycle ordering for process stages
+# ---------------------------------------------------------------------------
+# Maps common stage/status names to a position score (0.0 = start, 1.0 = end).
+# Stages not in this map get a score of 0.5 (middle).
+
+_STAGE_ORDER_HEURISTIC: dict[str, float] = {
+    # === Start / initial stages (0.00 - 0.15) ===
+    "new": 0.00, "created": 0.00, "draft": 0.02, "open": 0.05,
+    "registered": 0.05, "planned": 0.05, "identified": 0.05,
+    "backlog": 0.05, "todo": 0.08,
+    "submitted": 0.10, "pending": 0.10, "applied": 0.10,
+    "ordered": 0.10, "prescribed": 0.10,
+    "scheduled": 0.12, "initiated": 0.12,
+
+    # === Early-middle (0.15 - 0.35) ===
+    "screening": 0.18, "phone_screen": 0.20, "preparing": 0.20,
+    "proposed": 0.20, "sent": 0.20,
+    "sample_collected": 0.22, "confirmed": 0.25, "viewed": 0.25,
+    "under_review": 0.25, "assessment": 0.28, "checked_in": 0.28,
+    "probation": 0.28, "approved": 0.30,
+    "technical_test": 0.32, "interviewing": 0.34, "interview": 0.34,
+
+    # === Middle / active (0.35 - 0.60) ===
+    "offer": 0.38, "offer_made": 0.38,
+    "active": 0.40, "in_progress": 0.42, "processing": 0.42,
+    "shipped": 0.44, "dispensed": 0.45,
+    "in_transit": 0.48, "on_hold": 0.50,
+    "in_review": 0.50, "review": 0.50, "testing": 0.52,
+    "partial_payment": 0.50, "customs": 0.55,
+    "on_leave": 0.55,
+
+    # === Late-middle (0.60 - 0.80) ===
+    "picked_up": 0.60, "delayed": 0.62,
+    "needs_recheck": 0.65, "results_ready": 0.65,
+    "overdue": 0.68, "received": 0.70, "reviewed": 0.70,
+    "findings_reported": 0.72, "inspected": 0.74,
+    "remediation": 0.76, "stored": 0.78,
+    "frozen": 0.78, "implemented": 0.80,
+    "communicated": 0.80,
+
+    # === Pre-terminal / success (0.80 - 0.92) ===
+    "verified": 0.82, "accepted": 0.82, "mitigated": 0.82,
+    "passed": 0.84, "reimbursed": 0.86,
+    "delivered": 0.88, "paid": 0.88, "filled": 0.88, "hired": 0.88,
+    "completed": 0.90, "done": 0.90, "closed": 0.92,
+    "resolved": 0.90, "discharged": 0.90, "inactive": 0.90,
+
+    # === Terminal / negative (0.94 - 1.00) ===
+    "terminated": 0.94, "rejected": 0.94, "cancelled": 0.94,
+    "failed": 0.94, "blocked": 0.94,
+    "no_show": 0.96, "written_off": 0.96, "reversed": 0.96,
+    "discontinued": 0.96, "damaged": 0.96, "blacklisted": 0.96,
+    "deceased": 1.00,
+}
+
+
+def _stage_order_score(stage: str) -> float:
+    """Get ordering score for a stage name.
+
+    Tries exact match first, then checks if a known pattern appears inside the
+    stage name (e.g., 'order_completed' contains 'completed').
+    """
+    key = stage.lower().strip()
+    if key in _STAGE_ORDER_HEURISTIC:
+        return _STAGE_ORDER_HEURISTIC[key]
+
+    # Partial matching: check if known patterns appear inside the stage name
+    # Only match patterns of 4+ chars to avoid false positives
+    best_score: float | None = None
+    best_len = 0
+    for pattern, score in _STAGE_ORDER_HEURISTIC.items():
+        if len(pattern) >= 4 and pattern in key and len(pattern) > best_len:
+            best_score = score
+            best_len = len(pattern)
+
+    if best_score is not None:
+        return best_score
+
+    return 0.5  # Unknown stages go to the middle
