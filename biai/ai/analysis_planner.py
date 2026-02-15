@@ -4,6 +4,7 @@ import json
 
 import httpx
 
+from biai.ai.language import normalize_response_language, response_language_instruction
 from biai.ai.prompt_templates import ANALYSIS_PLAN_PROMPT
 from biai.models.analysis import AnalysisPlan, AnalysisStep, StepType
 from biai.models.schema import SchemaSnapshot
@@ -20,9 +21,11 @@ class AnalysisPlanner:
         self,
         ollama_host: str = DEFAULT_OLLAMA_HOST,
         ollama_model: str = DEFAULT_MODEL,
+        response_language: str = "pl",
     ):
         self._ollama_host = ollama_host
         self._ollama_model = ollama_model
+        self._response_language = normalize_response_language(response_language)
 
     async def plan(
         self,
@@ -61,6 +64,7 @@ class AnalysisPlanner:
             question=question,
             schema_summary=schema_summary or "(schema not available)",
             context=ctx_text or "(no previous context)",
+            language_instruction=response_language_instruction(self._response_language),
         )
 
         try:

@@ -6,6 +6,7 @@ import re
 import httpx
 import pandas as pd
 
+from biai.ai.language import normalize_response_language, response_language_instruction
 from biai.ai.prompt_templates import STORYTELLING_PROMPT
 from biai.config.constants import LLM_OPTIONS
 from biai.models.insight import Insight
@@ -22,9 +23,11 @@ class DataStoryteller:
         self,
         ollama_host: str = "http://localhost:11434",
         ollama_model: str = "qwen2.5-coder:7b-instruct-q4_K_M",
+        response_language: str = "pl",
     ):
         self._host = ollama_host
         self._model = ollama_model
+        self._response_language = normalize_response_language(response_language)
 
     async def generate_story(
         self,
@@ -44,6 +47,7 @@ class DataStoryteller:
             question=question,
             findings=findings,
             insights=insight_text or "No specific insights detected.",
+            language_instruction=response_language_instruction(self._response_language),
         )
 
         try:

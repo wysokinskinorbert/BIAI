@@ -20,6 +20,7 @@ from collections import defaultdict
 
 import httpx
 
+from biai.ai.language import normalize_response_language, response_language_instruction
 from biai.ai.metadata_graph import SchemaGraph
 from biai.ai.prompt_templates import PROCESS_DISCOVERY_PROMPT
 from biai.config.constants import (
@@ -86,12 +87,14 @@ class ProcessDiscoveryEngine:
         ollama_host: str = DEFAULT_OLLAMA_HOST,
         ollama_model: str = DEFAULT_MODEL,
         schema_name: str = "",
+        response_language: str = "pl",
     ):
         self._connector = connector
         self._schema = schema
         self._ollama_host = ollama_host
         self._ollama_model = ollama_model
         self._schema_name = schema_name
+        self._response_language = normalize_response_language(response_language)
 
     def _qualified_table(self, table_name: str) -> str:
         """Return schema-qualified table name if schema is set."""
@@ -734,6 +737,7 @@ class ProcessDiscoveryEngine:
         prompt = PROCESS_DISCOVERY_PROMPT.format(
             schema_ddl=schema_ddl,
             candidates_json=json.dumps(candidates_data, indent=2),
+            language_instruction=response_language_instruction(self._response_language),
         )
 
         try:

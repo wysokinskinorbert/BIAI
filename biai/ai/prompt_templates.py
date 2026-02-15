@@ -79,6 +79,7 @@ Write 2-3 sentences highlighting the key findings. Be specific with numbers. Use
 Do not use LaTeX, mathematical notation, or dollar signs for formatting. Use plain text only.
 IMPORTANT: Only reference values and names that appear in the actual data above. Do NOT invent, estimate, or hallucinate any values.
 CRITICAL: Do NOT generate any SQL code. Do NOT include ```sql blocks. Do NOT reason about queries. Only write a plain text business summary.
+{language_instruction}
 """
 
 
@@ -112,6 +113,7 @@ Guidelines:
 - Use hex colors that convey meaning (green=success, red=failure, blue=active, yellow=waiting)
 - Use Lucide icon names (e.g., "truck", "check-circle", "clock", "user")
 - If you cannot determine the process, set confidence to 0 and return minimal data
+{language_instruction}
 """
 
 PROCESS_DESCRIPTION_PROMPT = """Describe this business process based on the data below.
@@ -123,6 +125,7 @@ PROCESS_DESCRIPTION_PROMPT = """Describe this business process based on the data
 
 Provide a 3-4 sentence business-friendly description of what this process does,
 who uses it, and what the key stages mean. Use plain text only, no markdown.
+{language_instruction}
 """
 
 
@@ -187,6 +190,7 @@ Respond in this exact JSON format:
 
 If the question can be answered with a single SQL query, set is_complex to false and return one step.
 Only decompose into multiple steps if the question truly requires comparing separate query results.
+{language_instruction}
 """
 
 STORYTELLING_PROMPT = """Create a data narrative from these analysis results.
@@ -204,6 +208,7 @@ Write a structured narrative with:
 4. **Recommendations** — What action to take next (1-2 bullet points)
 
 Use business-friendly language. Be specific with numbers. No LaTeX or special formatting.
+{language_instruction}
 """
 
 

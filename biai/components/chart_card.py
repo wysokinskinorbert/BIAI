@@ -48,26 +48,30 @@ def chart_card() -> rx.Component:
                 ),
 
                 # ECharts container (dynamic height based on data)
-                rx.box(
-                    echarts_component(
-                        option=ChartState.echarts_option,
-                        not_merge=True,
+                rx.cond(
+                    ChartState.show_echarts,
+                    rx.box(
+                        echarts_component(
+                            option=ChartState.echarts_option,
+                            not_merge=True,
+                        ),
+                        width="100%",
+                        height=ChartState.chart_height,
+                        key=ChartState.chart_version,
                     ),
-                    width="100%",
-                    height=ChartState.chart_height,
-                    display=rx.cond(ChartState.show_echarts, "block", "none"),
-                    key=ChartState.chart_version,
                 ),
 
                 # Plotly container (fallback for complex charts)
-                rx.box(
-                    rx.plotly(
-                        data=ChartState.plotly_figure,
+                rx.cond(
+                    ChartState.show_plotly,
+                    rx.box(
+                        rx.plotly(
+                            data=ChartState.plotly_figure,
+                            key=ChartState.chart_version,
+                        ),
+                        width="100%",
                         key=ChartState.chart_version,
                     ),
-                    width="100%",
-                    display=rx.cond(ChartState.show_plotly, "block", "none"),
-                    key=ChartState.chart_version,
                 ),
 
                 width="100%",
@@ -96,23 +100,27 @@ def chart_card() -> rx.Component:
                     ),
                 ),
                 # Fullscreen ECharts
-                rx.box(
-                    echarts_component(
-                        option=ChartState.echarts_option,
-                        not_merge=True,
+                rx.cond(
+                    ChartState.show_fullscreen & ChartState.show_echarts,
+                    rx.box(
+                        echarts_component(
+                            option=ChartState.echarts_option,
+                            not_merge=True,
+                        ),
+                        width="100%",
+                        height="500px",
                     ),
-                    width="100%",
-                    height="500px",
-                    display=rx.cond(ChartState.show_echarts, "block", "none"),
                 ),
                 # Fullscreen Plotly
-                rx.box(
-                    rx.plotly(
-                        data=ChartState.plotly_figure,
+                rx.cond(
+                    ChartState.show_fullscreen & ChartState.show_plotly,
+                    rx.box(
+                        rx.plotly(
+                            data=ChartState.plotly_figure,
+                        ),
+                        width="100%",
+                        min_height="500px",
                     ),
-                    width="100%",
-                    min_height="500px",
-                    display=rx.cond(ChartState.show_plotly, "block", "none"),
                 ),
                 max_width="90vw",
                 width="90vw",

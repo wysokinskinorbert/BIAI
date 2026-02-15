@@ -147,6 +147,16 @@ class TestSQLValidator:
         result = validator.validate("  SELECT 1  ")
         assert result.is_valid
 
+    def test_strips_sql_tags(self, validator):
+        result = validator.validate("<sql>SELECT * FROM customers</sql>")
+        assert result.is_valid
+        assert result.sql == "SELECT * FROM customers"
+
+    def test_oracle_rewrites_limit(self, oracle_validator):
+        result = oracle_validator.validate("SELECT * FROM orders LIMIT 5")
+        assert result.is_valid
+        assert "FETCH FIRST 5 ROWS ONLY" in result.sql
+
     # UNION / INTERSECT / EXCEPT (set operations)
     def test_valid_union_all(self, validator):
         result = validator.validate(

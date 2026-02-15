@@ -6,6 +6,7 @@ from pathlib import Path
 
 import httpx
 
+from biai.ai.language import normalize_response_language, response_language_instruction
 from biai.models.schema import SchemaSnapshot
 from biai.models.glossary import BusinessGlossary, TableDescription, ColumnDescription
 from biai.models.profile import TableProfile
@@ -50,6 +51,7 @@ Guidelines:
 - For columns with abbreviations (e.g., ltv, qty, sku), spell out the full meaning
 - For status/category columns, explain the possible values if visible in profiles
 - Keep descriptions concise but informative
+{language_instruction}
 """
 
 
@@ -60,9 +62,11 @@ class BusinessGlossaryGenerator:
         self,
         ollama_host: str = DEFAULT_OLLAMA_HOST,
         ollama_model: str = DEFAULT_MODEL,
+        response_language: str = "pl",
     ):
         self._ollama_host = ollama_host
         self._ollama_model = ollama_model
+        self._response_language = normalize_response_language(response_language)
 
     async def generate(
         self,
@@ -97,6 +101,7 @@ class BusinessGlossaryGenerator:
         prompt = GLOSSARY_PROMPT.format(
             schema_ddl=schema_ddl,
             profiles_section=profiles_section,
+            language_instruction=response_language_instruction(self._response_language),
         )
 
         try:

@@ -160,11 +160,37 @@ def _settings_panel() -> rx.Component:
             ),
         ),
 
+        # Language
+        _sidebar_settings_section(
+            "Language", "languages",
+            rx.vstack(
+                rx.text("LLM response language", size="1", color="var(--gray-11)"),
+                rx.select(
+                    ["pl", "en"],
+                    value=SettingsState.settings_response_language,
+                    on_change=SettingsState.set_response_language,
+                    size="1",
+                    width="100%",
+                ),
+                rx.text("Enforcement mode", size="1", color="var(--gray-11)"),
+                rx.select(
+                    ["strict", "best_effort"],
+                    value=SettingsState.settings_language_enforcement_mode,
+                    on_change=SettingsState.set_language_enforcement_mode,
+                    size="1",
+                    width="100%",
+                ),
+                width="100%",
+                spacing="1",
+            ),
+        ),
+
         # Ollama LLM
         _sidebar_settings_section(
             "Ollama LLM", "brain",
             _sidebar_field("Host", SettingsState.settings_ollama_host, SettingsState.set_ollama_host),
-            _sidebar_field("Model", SettingsState.settings_ollama_model, SettingsState.set_ollama_model),
+            _sidebar_field("SQL model", SettingsState.settings_ollama_sql_model, SettingsState.set_ollama_sql_model),
+            _sidebar_field("Response model", SettingsState.settings_ollama_nlg_model, SettingsState.set_ollama_nlg_model),
         ),
 
         # ChromaDB

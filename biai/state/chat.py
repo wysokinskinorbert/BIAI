@@ -1,9 +1,16 @@
 """Chat state with background streaming."""
 
+import asyncio
 import re
 
 import reflex as rx
 
+from biai.ai.language import (
+    detect_primary_language,
+    is_language_compliant,
+    normalize_language_enforcement_mode,
+    normalize_response_language,
+)
 from biai.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -49,13 +56,134 @@ def _strip_sql_blocks(text: str) -> str:
     return text.strip()
 
 
+def _strip_internal_tags(text: str) -> str:
+    """Strip internal planner/action tags that may leak from model output."""
+    cleaned = re.sub(
+        r"<(think|thinking|plan|execute|review|conclusion|analysis|action|result|observation)\b[^>]*>.*?</\1>",
+        "",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    cleaned = re.sub(
+        r"</?(?:plan|execute|review|conclusion|action|result|analysis|think|thinking|observation)\b[^>]*>",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    return cleaned
+
+
+def _sanitize_llm_text(text: str) -> str:
+    """Sanitize LLM text for safe plain-text chat rendering."""
+    cleaned = _strip_internal_tags(_strip_sql_blocks(_strip_latex(text)))
+    marker = re.search(
+        r"(?:final answer|final summary|ostateczna odpowiedz|finalna odpowiedz)\s*[:\-]",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    if marker:
+        cleaned = cleaned[marker.end():]
+    return cleaned.strip()
+
+
+async def _rewrite_text_language(
+    text: str,
+    target_language: str,
+    ollama_host: str,
+    ollama_model: str,
+    retry_level: int = 0,
+) -> str:
+    """Rewrite text into target language to enforce final UI language consistency."""
+    cleaned = text.strip()
+    if not cleaned:
+        return text
+
+    language = normalize_response_language(target_language)
+    if language == "en":
+        system = "You are an editor. Reply only in English."
+        prompt = (
+            "Rewrite the text into natural English for a business user.\n"
+            "Return only the final answer. No XML/HTML/Markdown tags, no meta commentary.\n"
+            "Keep numbers, table names, and meaning unchanged.\n"
+            "Do not output Polish words except unavoidable database identifiers.\n\nText:\n"
+            f"{cleaned}"
+        )
+        if retry_level > 0:
+            prompt = (
+                "STRICT ENFORCEMENT: output must be entirely English.\n"
+                "If a phrase cannot be translated, rewrite it into plain English.\n\n"
+            ) + prompt
+    else:
+        system = "Jestes redaktorem. Odpowiadaj tylko po polsku."
+        prompt = (
+            "Przepisz tekst na naturalny jezyk polski dla uzytkownika biznesowego.\n"
+            "Zwroc tylko gotowa odpowiedz: bez planu, bez komentarzy o tlumaczeniu, bez znacznikow XML/HTML/Markdown.\n"
+            "Zachowaj liczby, nazwy tabel i znaczenie. Nie dodawaj nowych informacji.\n"
+            "Nie uzywaj angielskich zdan poza identyfikatorami SQL.\n\nTekst:\n"
+            f"{cleaned}"
+        )
+        if retry_level > 0:
+            prompt = (
+                "TRYB SCISLY: odpowiedz ma byc calkowicie po polsku.\n"
+                "Jesli nie da sie przetlumaczyc frazy 1:1, sparafrazuj po polsku.\n\n"
+            ) + prompt
+
+    try:
+        import httpx
+
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{ollama_host}/api/generate",
+                json={
+                    "model": ollama_model,
+                    "system": system,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {
+                        "temperature": 0,
+                        "seed": 42,
+                        "top_k": 1,
+                        "num_predict": 700,
+                    },
+                },
+                timeout=45.0,
+            )
+            resp.raise_for_status()
+            rewritten = str(resp.json().get("response", "")).strip()
+            if rewritten:
+                return rewritten
+    except Exception as e:
+        logger.warning("language_rewrite_failed", error=str(e))
+
+    return text
+
+
+def _language_fallback_message(target_language: str) -> str:
+    """Fallback text when strict language enforcement cannot be satisfied."""
+    language = normalize_response_language(target_language)
+    if language == "en":
+        return "I could not produce a stable English answer right now. Please try again."
+    return "Nie udalo sie przygotowac stabilnej odpowiedzi po polsku. Sprobuj ponownie."
+
+
 def _make_message(**kwargs) -> dict:
     """Create a validated message dict via ChatMessage model."""
     return ChatMessage(**kwargs).model_dump()
 
 
-def _generate_suggestions(question: str, columns: list[str], row_count: int) -> list[str]:
+def _generate_suggestions(
+    question: str,
+    columns: list[str],
+    row_count: int,
+    language: str = "pl",
+) -> list[str]:
     """Generate follow-up query suggestions based on current result."""
+    language = language.lower()
+    is_en = language == "en"
+
+    def t(pl: str, en: str) -> str:
+        return en if is_en else pl
+
     suggestions = []
     q_lower = question.lower()
     col_names = [c.lower() for c in columns]
@@ -63,28 +191,33 @@ def _generate_suggestions(question: str, columns: list[str], row_count: int) -> 
     # Time-based drill-down
     time_words = {"month", "year", "daily", "weekly", "trend", "monthly"}
     if any(w in q_lower for w in time_words):
-        suggestions.append("Show this data broken down by quarter")
+        suggestions.append(t("Pokaż te dane w podziale na kwartały", "Show this data broken down by quarter"))
 
     # If showing aggregated data, suggest details
     agg_words = {"total", "count", "average", "sum", "avg", "mean"}
     if any(w in q_lower for w in agg_words):
-        suggestions.append("Show the top 10 individual records for this data")
+        suggestions.append(
+            t(
+                "Pokaż 10 najważniejszych pojedynczych rekordów dla tych danych",
+                "Show the top 10 individual records for this data",
+            )
+        )
 
     # If showing by category, suggest trend
     cat_words = {"by", "per", "wg", "według", "dla", "each"}
     if any(w in q_lower for w in cat_words) and row_count > 1:
-        suggestions.append("Show the trend over time for this data")
+        suggestions.append(t("Pokaż trend tych danych w czasie", "Show the trend over time for this data"))
 
     # If few rows, suggest broader view
     if row_count <= 5:
-        suggestions.append("Show all records related to this query")
+        suggestions.append(t("Pokaż wszystkie rekordy powiązane z tym zapytaniem", "Show all records related to this query"))
     elif row_count > 20:
-        suggestions.append("Show only the top 5 results")
+        suggestions.append(t("Pokaż tylko 5 najważniejszych wyników", "Show only the top 5 results"))
 
     # Process-related suggestions
     process_words = {"process", "flow", "etap", "stage", "pipeline", "status"}
     if any(w in q_lower for w in process_words):
-        suggestions.append("What are the bottlenecks in this process?")
+        suggestions.append(t("Jakie są wąskie gardła w tym procesie?", "What are the bottlenecks in this process?"))
 
     return suggestions[:3]
 
@@ -110,6 +243,7 @@ class ChatState(rx.State):
     _trained_schema: str = ""
     _training_failures: int = 0
     _MAX_TRAINING_RETRIES: int = 2
+    _SCHEMA_TRAIN_TIMEOUT_SECONDS: int = 30
 
     # Clear chat confirmation
     confirm_clear: bool = False
@@ -213,11 +347,26 @@ class ChatState(rx.State):
 
         try:
             from biai.ai.storyteller import DataStoryteller
-            from biai.config.settings import get_settings
-            settings = get_settings()
+            from biai.state.model import ModelState
+            from biai.pages.settings import SettingsState
+
+            async with self:
+                model_state = await self.get_state(ModelState)
+                settings_state = await self.get_state(SettingsState)
+
+            ollama_host = ""
+            selected_nlg_model = ""
+            response_language = "pl"
+            async with model_state:
+                ollama_host = model_state.ollama_host
+                selected_nlg_model = model_state.selected_nlg_model
+            async with settings_state:
+                response_language = settings_state.settings_response_language
+
             storyteller = DataStoryteller(
-                ollama_host=settings.ollama_host,
-                ollama_model=settings.ollama_model,
+                ollama_host=ollama_host,
+                ollama_model=selected_nlg_model,
+                response_language=response_language,
             )
             # Get insights if available
             insight_objs = None
@@ -316,28 +465,43 @@ class ChatState(rx.State):
             from biai.models.connection import DBType
             from biai.state.model import ModelState
             from biai.state.schema import SchemaState
+            from biai.pages.settings import SettingsState
 
             # get_state must be called inside async with self
             async with self:
                 model_state = await self.get_state(ModelState)
                 schema_state = await self.get_state(SchemaState)
+                settings_state = await self.get_state(SettingsState)
 
-            selected_model = ""
+            selected_sql_model = ""
+            selected_nlg_model = ""
             ollama_host = ""
             async with model_state:
-                selected_model = model_state.selected_model
+                selected_sql_model = model_state.selected_model
+                selected_nlg_model = model_state.selected_nlg_model
                 ollama_host = model_state.ollama_host
 
             selected_schema = ""
             async with schema_state:
                 selected_schema = schema_state.selected_schema
 
+            response_language = "pl"
+            language_enforcement_mode = "strict"
+            async with settings_state:
+                response_language = settings_state.settings_response_language
+                language_enforcement_mode = normalize_language_enforcement_mode(
+                    settings_state.settings_language_enforcement_mode
+                )
+
             pipeline = AIPipeline(
                 connector=connector,
                 db_type=DBType(db_type_str),
-                ollama_model=selected_model,
+                ollama_model=selected_sql_model,
+                ollama_sql_model=selected_sql_model,
+                ollama_nlg_model=selected_nlg_model,
                 ollama_host=ollama_host,
                 schema_name=selected_schema,
+                response_language=response_language,
             )
 
             # Lazy schema training (retrain when schema changes)
@@ -349,7 +513,10 @@ class ChatState(rx.State):
                 async with self:
                     self._update_last_message(content="Training schema... (first query only)")
                 try:
-                    await pipeline.train_schema()
+                    await asyncio.wait_for(
+                        pipeline.train_schema(),
+                        timeout=self._SCHEMA_TRAIN_TIMEOUT_SECONDS,
+                    )
                     async with self:
                         self._schema_trained = True
                         self._trained_schema = selected_schema
@@ -553,7 +720,7 @@ class ChatState(rx.State):
                     description_parts.append(token)
                     async with self:
                         self._update_last_message(
-                            content=_strip_sql_blocks(_strip_latex("".join(description_parts))),
+                            content=_sanitize_llm_text("".join(description_parts)),
                             sql=result.sql_query.sql,
                             has_chart=result.chart_config is not None,
                             has_table=True,
@@ -562,9 +729,51 @@ class ChatState(rx.State):
                             is_multi_step=_is_multi,
                         )
 
+                final_description = _sanitize_llm_text("".join(description_parts))
+                if language_enforcement_mode == "strict":
+                    candidate = final_description
+                    compliant = is_language_compliant(candidate, response_language)
+                    for attempt in range(2):
+                        if compliant:
+                            break
+                        candidate = await _rewrite_text_language(
+                            candidate,
+                            response_language,
+                            ollama_host,
+                            selected_nlg_model,
+                            retry_level=attempt,
+                        )
+                        candidate = _sanitize_llm_text(candidate)
+                        compliant = is_language_compliant(candidate, response_language)
+                        logger.info(
+                            "language_enforcement_attempt",
+                            target=response_language,
+                            detected=detect_primary_language(candidate),
+                            attempt=attempt + 1,
+                            mode=language_enforcement_mode,
+                        )
+
+                    if not compliant:
+                        logger.warning(
+                            "language_enforcement_failed",
+                            target=response_language,
+                            detected=detect_primary_language(candidate),
+                        )
+                        candidate = _language_fallback_message(response_language)
+
+                    final_description = candidate
+                else:
+                    final_description = await _rewrite_text_language(
+                        final_description,
+                        response_language,
+                        ollama_host,
+                        selected_nlg_model,
+                    )
+                    final_description = _sanitize_llm_text(final_description)
+
                 async with self:
                     self._update_last_message(
-                        content=_strip_sql_blocks(_strip_latex("".join(description_parts))),
+                        content=final_description,
                         sql=result.sql_query.sql,
                         has_chart=result.chart_config is not None,
                         has_table=True,
@@ -577,6 +786,7 @@ class ChatState(rx.State):
                         question,
                         result.query_result.columns,
                         result.query_result.row_count,
+                        response_language,
                     )
                     # Store conversation context for multi-turn
                     self.conversation_context.append({
@@ -591,6 +801,7 @@ class ChatState(rx.State):
 
                 # Run insight agent in background (non-blocking)
                 if result.df is not None and not result.df.empty:
+                    insight_dicts = []
                     try:
                         from biai.ai.insight_agent import InsightAgent
                         agent = InsightAgent()
@@ -624,7 +835,8 @@ class ChatState(rx.State):
                             from biai.ai.storyteller import DataStoryteller
                             storyteller = DataStoryteller(
                                 ollama_host=ollama_host,
-                                ollama_model=selected_model,
+                                ollama_model=selected_nlg_model,
+                                response_language=response_language,
                             )
                             from biai.models.insight import Insight
                             insight_objs = [Insight(**d) for d in insight_dicts] if insight_dicts else []

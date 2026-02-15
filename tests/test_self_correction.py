@@ -22,6 +22,10 @@ class TestCleanSQL:
         raw = "```sql\nSELECT * FROM test\n```"
         assert "SELECT * FROM test" in _clean_sql(raw)
 
+    def test_clean_sql_tags(self):
+        raw = "<sql>SELECT * FROM test</sql>"
+        assert _clean_sql(raw) == "SELECT * FROM test"
+
     def test_clean_whitespace(self):
         assert _clean_sql("  SELECT 1  ") == "SELECT 1"
 

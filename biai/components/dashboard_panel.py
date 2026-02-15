@@ -157,11 +157,13 @@ def dashboard_panel() -> rx.Component:
                         width="100%",
                     ),
 
-                    # Chart card (always rendered, visibility via CSS to avoid hooks warning)
-                    rx.box(
-                        chart_card(),
-                        display=rx.cond(ChartState.has_chart, "block", "none"),
-                        width="100%",
+                    # Chart card
+                    rx.cond(
+                        ChartState.has_chart,
+                        rx.box(
+                            chart_card(),
+                            width="100%",
+                        ),
                     ),
 
                     # Process map card (discovery)
@@ -190,57 +192,61 @@ def dashboard_panel() -> rx.Component:
                     ),
 
                     # Sankey diagram (transition flow from event log)
-                    rx.box(
-                        rx.card(
-                            rx.vstack(
-                                rx.hstack(
-                                    rx.icon("git-merge", size=16, color="var(--accent-9)"),
-                                    rx.text("Transition Flow", size="3", weight="bold"),
-                                    width="100%",
-                                    align="center",
-                                ),
-                                rx.box(
-                                    echarts_component(
-                                        option=ProcessState.sankey_option,
-                                        not_merge=True,
+                    rx.cond(
+                        ProcessState.show_sankey,
+                        rx.box(
+                            rx.card(
+                                rx.vstack(
+                                    rx.hstack(
+                                        rx.icon("git-merge", size=16, color="var(--accent-9)"),
+                                        rx.text("Transition Flow", size="3", weight="bold"),
+                                        width="100%",
+                                        align="center",
+                                    ),
+                                    rx.box(
+                                        echarts_component(
+                                            option=ProcessState.sankey_option,
+                                            not_merge=True,
+                                        ),
+                                        width="100%",
+                                        height="350px",
                                     ),
                                     width="100%",
-                                    height="350px",
+                                    spacing="3",
                                 ),
                                 width="100%",
-                                spacing="3",
                             ),
                             width="100%",
                         ),
-                        display=rx.cond(ProcessState.show_sankey, "block", "none"),
-                        width="100%",
                     ),
 
                     # Timeline scatter (events over time)
-                    rx.box(
-                        rx.card(
-                            rx.vstack(
-                                rx.hstack(
-                                    rx.icon("clock", size=16, color="var(--accent-9)"),
-                                    rx.text("Event Timeline", size="3", weight="bold"),
-                                    width="100%",
-                                    align="center",
-                                ),
-                                rx.box(
-                                    echarts_component(
-                                        option=ProcessState.timeline_option,
-                                        not_merge=True,
+                    rx.cond(
+                        ProcessState.show_timeline,
+                        rx.box(
+                            rx.card(
+                                rx.vstack(
+                                    rx.hstack(
+                                        rx.icon("clock", size=16, color="var(--accent-9)"),
+                                        rx.text("Event Timeline", size="3", weight="bold"),
+                                        width="100%",
+                                        align="center",
+                                    ),
+                                    rx.box(
+                                        echarts_component(
+                                            option=ProcessState.timeline_option,
+                                            not_merge=True,
+                                        ),
+                                        width="100%",
+                                        height="300px",
                                     ),
                                     width="100%",
-                                    height="300px",
+                                    spacing="3",
                                 ),
                                 width="100%",
-                                spacing="3",
                             ),
                             width="100%",
                         ),
-                        display=rx.cond(ProcessState.show_timeline, "block", "none"),
-                        width="100%",
                     ),
 
                     # Data table
@@ -254,14 +260,12 @@ def dashboard_panel() -> rx.Component:
                     ),
 
                     # Schema topology graph (always available when discovered)
-                    rx.box(
-                        schema_graph_card(),
-                        display=rx.cond(
-                            SchemaState.show_schema_graph,
-                            "block",
-                            "none",
+                    rx.cond(
+                        SchemaState.show_schema_graph,
+                        rx.box(
+                            schema_graph_card(),
+                            width="100%",
                         ),
-                        width="100%",
                     ),
 
                     width="100%",

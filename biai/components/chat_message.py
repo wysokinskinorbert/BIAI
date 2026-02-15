@@ -38,14 +38,26 @@ def chat_message(message: dict) -> rx.Component:
                 ),
                 # Content
                 rx.cond(
-                    message["is_streaming"],
+                    message["is_error"],
+                    rx.text(
+                        message["content"],
+                        size="2",
+                        white_space="pre-wrap",
+                    ),
                     rx.hstack(
-                        rx.markdown(message["content"], size="2"),
-                        rx.spinner(size="1"),
+                        rx.text(
+                            message["content"],
+                            size="2",
+                            white_space="pre-wrap",
+                        ),
+                        rx.cond(
+                            message["is_streaming"],
+                            rx.spinner(size="1"),
+                        ),
                         align="end",
                         spacing="2",
+                        width="100%",
                     ),
-                    rx.markdown(message["content"], size="2"),
                 ),
 
                 # Multi-step analysis progress (per-message)

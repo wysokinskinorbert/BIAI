@@ -8,6 +8,7 @@ LLM_TEMPERATURE: float = 0        # 0 = deterministic
 LLM_SEED: int = 42                # Fixed seed for reproducibility
 LLM_OPTIONS: dict = {"temperature": LLM_TEMPERATURE, "seed": LLM_SEED, "top_k": 1}
 DEFAULT_MODEL: str = "a-kore/Arctic-Text2SQL-R1-7B"
+DEFAULT_NLG_MODEL: str = "qwen2.5-coder:7b-instruct-q4_K_M"
 DEFAULT_OLLAMA_HOST: str = "http://localhost:11434"
 DEFAULT_CHROMA_HOST: str = "http://localhost:8000"
 DEFAULT_CHROMA_COLLECTION: str = "biai_schema"
@@ -67,4 +68,3 @@ BLOCKED_PATTERNS: list[str] = [
     r"INTO\s+DUMPFILE",
     r"LOAD_FILE",
 ]
-

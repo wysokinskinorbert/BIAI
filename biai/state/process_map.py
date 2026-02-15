@@ -72,15 +72,20 @@ class ProcessMapState(rx.State):
 
             # Get model config
             from biai.state.model import ModelState
+            from biai.pages.settings import SettingsState
 
             async with self:
                 model_state = await self.get_state(ModelState)
+                settings_state = await self.get_state(SettingsState)
 
             ollama_host = ""
             ollama_model = ""
+            response_language = "pl"
             async with model_state:
                 ollama_host = model_state.ollama_host
-                ollama_model = model_state.selected_model
+                ollama_model = model_state.selected_nlg_model
+            async with settings_state:
+                response_language = settings_state.settings_response_language
 
             # Get selected schema from SchemaState
             from biai.state.schema import SchemaState
@@ -105,6 +110,7 @@ class ProcessMapState(rx.State):
                 ollama_host=ollama_host,
                 ollama_model=ollama_model,
                 schema_name=schema.schema_name if schema.schema_name != "USER" else "",
+                response_language=response_language,
             )
             discovered = await engine.discover()
 

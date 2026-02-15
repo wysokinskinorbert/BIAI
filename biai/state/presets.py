@@ -150,5 +150,12 @@ class PresetsState(rx.State):
             db_state.dsn = preset.get("dsn", "")
             db_state.connection_error = ""
 
+        from biai.state.model import ModelState
+
+        async with self:
+            model_state = await self.get_state(ModelState)
+        async with model_state:
+            model_state.suggest_profile_for_db(preset["db_type"])
+
         async with self:
             self.preset_message = f"Loaded: {preset['name']}"

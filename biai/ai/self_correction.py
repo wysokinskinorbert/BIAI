@@ -3,6 +3,7 @@
 import re
 
 from biai.ai.sql_validator import SQLValidator
+from biai.ai.sql_sanitizer import sanitize_generated_sql
 from biai.ai.prompt_templates import CORRECTION_PROMPT
 from biai.config.constants import MAX_RETRIES
 from biai.models.query import SQLQuery, QueryError
@@ -114,11 +115,5 @@ class SelfCorrectionLoop:
 
 
 def _clean_sql(raw: str) -> str:
-    """Remove markdown code fences and extra whitespace from generated SQL."""
-    sql = raw.strip()
-    # Remove ```sql ... ``` blocks
-    if sql.startswith("```"):
-        lines = sql.split("\n")
-        lines = [l for l in lines if not l.strip().startswith("```")]
-        sql = "\n".join(lines)
-    return sql.strip()
+    """Normalize generated SQL into a parser-friendly statement."""
+    return sanitize_generated_sql(raw)

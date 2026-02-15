@@ -7,7 +7,7 @@ from pydantic import Field
 
 from biai.config.constants import (
     DEFAULT_MODEL, DEFAULT_OLLAMA_HOST, DEFAULT_CHROMA_HOST,
-    DEFAULT_CHROMA_COLLECTION, QUERY_TIMEOUT, ROW_LIMIT,
+    DEFAULT_CHROMA_COLLECTION, DEFAULT_NLG_MODEL, QUERY_TIMEOUT, ROW_LIMIT,
 )
 
 # Project root — directory containing rxconfig.py
@@ -27,6 +27,8 @@ class AppSettings(BaseSettings):
     # Ollama
     ollama_host: str = Field(default=DEFAULT_OLLAMA_HOST)
     ollama_model: str = Field(default=DEFAULT_MODEL)
+    ollama_sql_model: str = Field(default="")
+    ollama_nlg_model: str = Field(default=DEFAULT_NLG_MODEL)
 
     # ChromaDB
     chroma_host: str = Field(default=DEFAULT_CHROMA_HOST)
@@ -48,11 +50,18 @@ class AppSettings(BaseSettings):
     app_log_level: str = Field(default="INFO")
     query_timeout: int = Field(default=QUERY_TIMEOUT)
     query_row_limit: int = Field(default=ROW_LIMIT)
+    response_language: str = Field(default="pl")
+    language_enforcement_mode: str = Field(default="strict")
 
 
 def get_settings() -> AppSettings:
     """Get cached settings instance."""
-    return AppSettings()
+    settings = AppSettings()
+    if not settings.ollama_sql_model:
+        settings.ollama_sql_model = settings.ollama_model or DEFAULT_MODEL
+    if not settings.ollama_nlg_model:
+        settings.ollama_nlg_model = DEFAULT_NLG_MODEL
+    return settings
 
 
 def save_env_setting(key: str, value: str) -> None:

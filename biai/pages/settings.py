@@ -2,26 +2,37 @@
 
 import reflex as rx
 
+from biai.ai.language import normalize_language_enforcement_mode, normalize_response_language
 from biai.config.constants import (
     DEFAULT_MODEL, DEFAULT_OLLAMA_HOST, DEFAULT_CHROMA_HOST,
-    DEFAULT_CHROMA_COLLECTION, QUERY_TIMEOUT, ROW_LIMIT,
+    DEFAULT_CHROMA_COLLECTION, DEFAULT_NLG_MODEL, QUERY_TIMEOUT, ROW_LIMIT,
 )
+from biai.config.settings import get_settings, save_env_setting
+
+_settings = get_settings()
 
 
 class SettingsState(rx.State):
     """State for application settings."""
 
     # Ollama
-    settings_ollama_host: str = DEFAULT_OLLAMA_HOST
-    settings_ollama_model: str = DEFAULT_MODEL
+    settings_ollama_host: str = _settings.ollama_host
+    settings_ollama_sql_model: str = _settings.ollama_sql_model or _settings.ollama_model
+    settings_ollama_nlg_model: str = _settings.ollama_nlg_model
 
     # ChromaDB
-    settings_chroma_host: str = DEFAULT_CHROMA_HOST
-    settings_chroma_collection: str = DEFAULT_CHROMA_COLLECTION
+    settings_chroma_host: str = _settings.chroma_host
+    settings_chroma_collection: str = _settings.chroma_collection
 
     # Query (stored as str for input binding)
-    settings_query_timeout: str = str(QUERY_TIMEOUT)
-    settings_row_limit: str = str(ROW_LIMIT)
+    settings_query_timeout: str = str(_settings.query_timeout)
+    settings_row_limit: str = str(_settings.query_row_limit)
+
+    # Language
+    settings_response_language: str = normalize_response_language(_settings.response_language)
+    settings_language_enforcement_mode: str = normalize_language_enforcement_mode(
+        _settings.language_enforcement_mode
+    )
 
     # Status
     save_message: str = ""
@@ -29,8 +40,15 @@ class SettingsState(rx.State):
     def set_ollama_host(self, value: str):
         self.settings_ollama_host = value
 
+    def set_ollama_sql_model(self, value: str):
+        self.settings_ollama_sql_model = value
+
+    def set_ollama_nlg_model(self, value: str):
+        self.settings_ollama_nlg_model = value
+
+    # Backward-compatible alias for existing bindings
     def set_ollama_model(self, value: str):
-        self.settings_ollama_model = value
+        self.settings_ollama_sql_model = value
 
     def set_chroma_host(self, value: str):
         self.settings_chroma_host = value
@@ -44,26 +62,61 @@ class SettingsState(rx.State):
     def set_row_limit(self, value: str):
         self.settings_row_limit = value
 
+    def set_response_language(self, value: str):
+        self.settings_response_language = normalize_response_language(value)
+
+    def set_language_enforcement_mode(self, value: str):
+        self.settings_language_enforcement_mode = normalize_language_enforcement_mode(value)
+
     async def save_settings(self):
         from biai.state.model import ModelState
+        timeout = QUERY_TIMEOUT
+        row_limit = ROW_LIMIT
+        try:
+            timeout = int(self.settings_query_timeout)
+        except ValueError:
+            timeout = QUERY_TIMEOUT
+        try:
+            row_limit = int(self.settings_row_limit)
+        except ValueError:
+            row_limit = ROW_LIMIT
+
+        save_env_setting("OLLAMA_HOST", self.settings_ollama_host)
+        save_env_setting("OLLAMA_MODEL", self.settings_ollama_sql_model)
+        save_env_setting("OLLAMA_SQL_MODEL", self.settings_ollama_sql_model)
+        save_env_setting("OLLAMA_NLG_MODEL", self.settings_ollama_nlg_model)
+        save_env_setting("CHROMA_HOST", self.settings_chroma_host)
+        save_env_setting("CHROMA_COLLECTION", self.settings_chroma_collection)
+        save_env_setting("QUERY_TIMEOUT", str(timeout))
+        save_env_setting("QUERY_ROW_LIMIT", str(row_limit))
+        save_env_setting("RESPONSE_LANGUAGE", self.settings_response_language)
+        save_env_setting("LANGUAGE_ENFORCEMENT_MODE", self.settings_language_enforcement_mode)
+
         model_state = await self.get_state(ModelState)
         model_state.ollama_host = self.settings_ollama_host
-        model_state.selected_model = self.settings_ollama_model
+        model_state.selected_model = self.settings_ollama_sql_model
+        model_state.selected_nlg_model = self.settings_ollama_nlg_model
+        model_state.suggested_model = self.settings_ollama_sql_model
         self.save_message = "Settings saved successfully."
 
     async def reset_defaults(self):
         self.settings_ollama_host = DEFAULT_OLLAMA_HOST
-        self.settings_ollama_model = DEFAULT_MODEL
+        self.settings_ollama_sql_model = DEFAULT_MODEL
+        self.settings_ollama_nlg_model = DEFAULT_NLG_MODEL
         self.settings_chroma_host = DEFAULT_CHROMA_HOST
         self.settings_chroma_collection = DEFAULT_CHROMA_COLLECTION
         self.settings_query_timeout = str(QUERY_TIMEOUT)
         self.settings_row_limit = str(ROW_LIMIT)
+        self.settings_response_language = "pl"
+        self.settings_language_enforcement_mode = "strict"
         self.save_message = "Settings reset to defaults."
         # Propagate defaults back to ModelState
         from biai.state.model import ModelState
         model_state = await self.get_state(ModelState)
         model_state.ollama_host = self.settings_ollama_host
-        model_state.selected_model = self.settings_ollama_model
+        model_state.selected_model = self.settings_ollama_sql_model
+        model_state.selected_nlg_model = self.settings_ollama_nlg_model
+        model_state.suggested_model = self.settings_ollama_sql_model
 
 
 def _settings_section(title: str, icon_name: str, *children) -> rx.Component:
@@ -132,10 +185,16 @@ def settings_page() -> rx.Component:
                             DEFAULT_OLLAMA_HOST,
                         ),
                         _field(
-                            "Model",
-                            SettingsState.settings_ollama_model,
-                            SettingsState.set_ollama_model,
+                            "SQL model",
+                            SettingsState.settings_ollama_sql_model,
+                            SettingsState.set_ollama_sql_model,
                             DEFAULT_MODEL,
+                        ),
+                        _field(
+                            "Response model",
+                            SettingsState.settings_ollama_nlg_model,
+                            SettingsState.set_ollama_nlg_model,
+                            DEFAULT_NLG_MODEL,
                         ),
                     ),
 
@@ -172,6 +231,32 @@ def settings_page() -> rx.Component:
                             SettingsState.settings_row_limit,
                             SettingsState.set_row_limit,
                             str(ROW_LIMIT),
+                        ),
+                    ),
+
+                    # Language section
+                    _settings_section(
+                        "Language",
+                        "languages",
+                        rx.vstack(
+                            rx.text("LLM response language", size="2", color="var(--gray-11)"),
+                            rx.select(
+                                ["pl", "en"],
+                                value=SettingsState.settings_response_language,
+                                on_change=SettingsState.set_response_language,
+                                size="2",
+                                width="100%",
+                            ),
+                            rx.text("Language enforcement mode", size="2", color="var(--gray-11)"),
+                            rx.select(
+                                ["strict", "best_effort"],
+                                value=SettingsState.settings_language_enforcement_mode,
+                                on_change=SettingsState.set_language_enforcement_mode,
+                                size="2",
+                                width="100%",
+                            ),
+                            width="100%",
+                            spacing="1",
                         ),
                     ),
 

@@ -222,7 +222,7 @@ def _table_item(table: dict) -> rx.Component:
                 spacing="0",
             ),
             rx.spacer(),
-            rx.badge(table["col_count"].to(str), size="1", variant="soft"),
+            rx.badge(table["col_count"].to(str) + " cols", size="1", variant="soft"),
             width="100%",
             align="center",
             cursor="pointer",

@@ -5,6 +5,7 @@ import re
 import sqlglot
 from sqlglot import exp
 
+from biai.ai.sql_sanitizer import sanitize_generated_sql
 from biai.config.constants import BLOCKED_KEYWORDS, BLOCKED_PATTERNS
 from biai.models.query import SQLQuery
 from biai.utils.logger import get_logger
@@ -20,7 +21,7 @@ class SQLValidator:
 
     def validate(self, sql: str) -> SQLQuery:
         """Validate a SQL query. Returns SQLQuery with is_valid flag."""
-        sql = sql.strip().rstrip(";").strip()
+        sql = sanitize_generated_sql(sql).strip().rstrip(";").strip()
 
         # Strip SQL comments (AI models often generate -- or /* */ comments)
         sql = self._strip_comments(sql)
@@ -29,11 +30,16 @@ class SQLValidator:
         if self._dialect == "postgres":
             sql = self._rewrite_sqlite_functions(sql)
 
-        # Sanitize Oracle bind variable placeholders before validation
+        # Oracle-specific rewrites before parsing
         if self._dialect == "oracle":
+            sql = self._rewrite_oracle_limit(sql)
             sql = self._sanitize_bind_variables(sql)
 
         query = SQLQuery(sql=sql, dialect=self._dialect or "")
+
+        if not sql:
+            query.validation_error = "Empty SQL statement"
+            return query
 
         # Layer 1: Check for blocked keywords (case-insensitive)
         error = self._check_blocked_keywords(sql)
@@ -230,3 +236,28 @@ class SQLValidator:
         query can execute without parameters.
         """
         return re.sub(r":([A-Za-z_]\w*)", r"'\1'", sql)
+
+    def _rewrite_oracle_limit(self, sql: str) -> str:
+        """Rewrite LIMIT syntax to Oracle-compatible FETCH/OFFSET syntax."""
+        if re.search(r"\bFETCH\s+FIRST\b", sql, re.IGNORECASE):
+            return sql
+
+        sql = re.sub(
+            r"\bLIMIT\s+(\d+)\s+OFFSET\s+(\d+)\b",
+            lambda m: f"OFFSET {m.group(2)} ROWS FETCH NEXT {m.group(1)} ROWS ONLY",
+            sql,
+            flags=re.IGNORECASE,
+        )
+        sql = re.sub(
+            r"\bOFFSET\s+(\d+)\s+LIMIT\s+(\d+)\b",
+            lambda m: f"OFFSET {m.group(1)} ROWS FETCH NEXT {m.group(2)} ROWS ONLY",
+            sql,
+            flags=re.IGNORECASE,
+        )
+        sql = re.sub(
+            r"\bLIMIT\s+(\d+)\b",
+            lambda m: f"FETCH FIRST {m.group(1)} ROWS ONLY",
+            sql,
+            flags=re.IGNORECASE,
+        )
+        return sql

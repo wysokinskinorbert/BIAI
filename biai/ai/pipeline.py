@@ -18,11 +18,23 @@ from biai.ai.process_training import has_process_tables, get_process_documentati
 from biai.ai.process_discovery import ProcessDiscoveryEngine
 from biai.ai.process_cache import ProcessDiscoveryCache
 from biai.ai.process_training_dynamic import DynamicProcessTrainer
+from biai.ai.language import (
+    normalize_response_language,
+    response_language_instruction,
+    response_language_system_instruction,
+)
 
 # Module-level singleton: shared across pipeline instances (survives pipeline GC)
 _discovery_cache = ProcessDiscoveryCache()
 from biai.ai.prompt_templates import DESCRIPTION_PROMPT, SYSTEM_PROMPT, format_dialect_rules
-from biai.config.constants import DEFAULT_MODEL, DEFAULT_OLLAMA_HOST, DEFAULT_CHROMA_COLLECTION, USE_DYNAMIC_DISCOVERY, LLM_OPTIONS
+from biai.config.constants import (
+    DEFAULT_CHROMA_COLLECTION,
+    DEFAULT_MODEL,
+    DEFAULT_NLG_MODEL,
+    DEFAULT_OLLAMA_HOST,
+    LLM_OPTIONS,
+    USE_DYNAMIC_DISCOVERY,
+)
 from biai.db.base import DatabaseConnector
 from biai.db.dialect import DialectHelper, get_categorical_columns, build_distinct_values_docs
 from biai.db.schema_manager import SchemaManager
@@ -66,16 +78,23 @@ class AIPipeline:
         connector: DatabaseConnector,
         db_type: DBType = DBType.POSTGRESQL,
         ollama_model: str = DEFAULT_MODEL,
+        ollama_sql_model: str | None = None,
+        ollama_nlg_model: str | None = None,
         ollama_host: str = DEFAULT_OLLAMA_HOST,
         chroma_host: str | None = None,
         chroma_collection: str = DEFAULT_CHROMA_COLLECTION,
         schema_name: str = "",
+        response_language: str = "pl",
     ):
         self._connector = connector
         self._db_type = db_type
         self._ollama_host = ollama_host
-        self._ollama_model = ollama_model
+        self._ollama_sql_model = (ollama_sql_model or ollama_model or DEFAULT_MODEL).strip()
+        self._ollama_nlg_model = (ollama_nlg_model or DEFAULT_NLG_MODEL).strip()
+        if not self._ollama_nlg_model:
+            self._ollama_nlg_model = self._ollama_sql_model
         self._schema_name = schema_name
+        self._response_language = normalize_response_language(response_language)
 
         # Set dialect
         dialect = DialectHelper.get_sqlglot_dialect(db_type)
@@ -83,7 +102,7 @@ class AIPipeline:
 
         # Create Vanna client with correct dialect
         self._vanna = create_vanna_client(
-            model=ollama_model,
+            model=self._ollama_sql_model,
             ollama_host=ollama_host,
             chroma_host=chroma_host,
             chroma_collection=chroma_collection,
@@ -98,7 +117,8 @@ class AIPipeline:
         self._schema_manager = SchemaManager(connector)
         self._query_executor = QueryExecutor(connector)
         self._planner = AnalysisPlanner(
-            ollama_host=ollama_host, ollama_model=ollama_model,
+            ollama_host=ollama_host, ollama_model=self._ollama_sql_model,
+            response_language=self._response_language,
         )
         self._analysis_executor = AnalysisExecutor(
             self._correction, self._query_executor,
@@ -115,7 +135,8 @@ class AIPipeline:
         logger.info(
             "pipeline_initialized",
             db_type=db_type.value,
-            model=ollama_model,
+            sql_model=self._ollama_sql_model,
+            nlg_model=self._ollama_nlg_model,
         )
 
     @property
@@ -191,8 +212,9 @@ class AIPipeline:
                 engine = ProcessDiscoveryEngine(
                     self._connector, snapshot,
                     ollama_host=self._ollama_host,
-                    ollama_model=self._ollama_model,
+                    ollama_model=self._ollama_nlg_model,
                     schema_name=snapshot.schema_name if snapshot.schema_name != "USER" else "",
+                    response_language=self._response_language,
                 )
                 ctx.processes = await engine.discover()
                 _discovery_cache.store(self._connector.config, ctx.processes)
@@ -255,8 +277,9 @@ class AIPipeline:
                     engine = ProcessDiscoveryEngine(
                         self._connector, snapshot,
                         ollama_host=self._ollama_host,
-                        ollama_model=self._ollama_model,
+                        ollama_model=self._ollama_nlg_model,
                         schema_name=snapshot.schema_name if snapshot.schema_name != "USER" else "",
+                        response_language=self._response_language,
                     )
                     discovered = await engine.discover()
                     _discovery_cache.store(self._connector.config, discovered)
@@ -666,6 +689,7 @@ class AIPipeline:
             row_count=len(df),
             columns=", ".join(df.columns),
             key_points=key_points,
+            language_instruction=response_language_instruction(self._response_language),
         )
 
         try:
@@ -675,7 +699,8 @@ class AIPipeline:
                     "POST",
                     f"{self._ollama_host}/api/generate",
                     json={
-                        "model": self._ollama_model,
+                        "model": self._ollama_nlg_model,
+                        "system": response_language_system_instruction(self._response_language),
                         "prompt": prompt,
                         "stream": True,
                         "options": {**LLM_OPTIONS, "num_predict": 500},

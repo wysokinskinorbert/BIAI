@@ -576,24 +576,30 @@ class SchemaState(rx.State):
                 # Step 2: Process discovery (may query DB)
                 from biai.ai.process_discovery import ProcessDiscoveryEngine
                 from biai.ai.process_cache import ProcessDiscoveryCache
-                from biai.config.constants import DEFAULT_OLLAMA_HOST, DEFAULT_MODEL
+                from biai.config.constants import DEFAULT_NLG_MODEL, DEFAULT_OLLAMA_HOST
 
+                response_language = "pl"
                 try:
                     from biai.state.model import ModelState
+                    from biai.pages.settings import SettingsState
                     async with self:
                         model_state = await self.get_state(ModelState)
+                        settings_state = await self.get_state(SettingsState)
                     async with model_state:
                         ollama_host = model_state.ollama_host
-                        ollama_model = model_state.selected_model
+                        ollama_model = model_state.selected_nlg_model
+                    async with settings_state:
+                        response_language = settings_state.settings_response_language
                 except Exception:
                     ollama_host = DEFAULT_OLLAMA_HOST
-                    ollama_model = DEFAULT_MODEL
+                    ollama_model = DEFAULT_NLG_MODEL
 
                 engine = ProcessDiscoveryEngine(
                     connector, snapshot,
                     ollama_host=ollama_host,
                     ollama_model=ollama_model,
                     schema_name=snapshot.schema_name if snapshot.schema_name != "USER" else "",
+                    response_language=response_language,
                 )
                 processes = await engine.discover()
 
@@ -692,6 +698,7 @@ class SchemaState(rx.State):
         """Generate AI business glossary in background."""
         from biai.state.database import DBState
         from biai.state.model import ModelState
+        from biai.pages.settings import SettingsState
         from biai.models.connection import DBType
         from biai.ai.business_glossary import BusinessGlossaryGenerator
         from biai.models.profile import TableProfile
@@ -704,9 +711,13 @@ class SchemaState(rx.State):
         try:
             async with self:
                 model_state = await self.get_state(ModelState)
+                settings_state = await self.get_state(SettingsState)
             async with model_state:
                 ollama_host = model_state.ollama_host
-                selected_model = model_state.selected_model
+                selected_nlg_model = model_state.selected_nlg_model
+            response_language = "pl"
+            async with settings_state:
+                response_language = settings_state.settings_response_language
 
             profiles_raw = {}
             async with self:
@@ -748,7 +759,8 @@ class SchemaState(rx.State):
             try:
                 generator = BusinessGlossaryGenerator(
                     ollama_host=ollama_host,
-                    ollama_model=selected_model,
+                    ollama_model=selected_nlg_model,
+                    response_language=response_language,
                 )
                 glossary = await generator.generate(snapshot, profiles_obj or None)
 

@@ -3,6 +3,7 @@
 import reflex as rx
 
 from biai.state.database import DBState
+from biai.state.model import ModelState
 from biai.components.connection_presets import connection_presets
 
 
@@ -13,111 +14,121 @@ def connection_form() -> rx.Component:
         rx.separator(),
         rx.text("Database Connection", size="3", weight="bold"),
 
-        # DB Type selector
-        rx.select(
-            ["postgresql", "oracle"],
-            value=DBState.db_type,
-            on_change=DBState.set_db_type,
-            width="100%",
-            size="2",
-        ),
+        rx.form(
+            rx.vstack(
+                # DB Type selector
+                rx.select(
+                    ["postgresql", "oracle"],
+                    value=DBState.db_type,
+                    on_change=lambda v: [DBState.set_db_type(v), ModelState.suggest_profile_for_db(v)],
+                    width="100%",
+                    size="2",
+                ),
 
-        # Host
-        rx.input(
-            placeholder="Host *",
-            value=DBState.host,
-            on_change=DBState.set_host,
-            size="2",
-            width="100%",
-            required=True,
-        ),
+                # Host
+                rx.input(
+                    placeholder="Host *",
+                    value=DBState.host,
+                    on_change=DBState.set_host,
+                    size="2",
+                    width="100%",
+                    required=True,
+                ),
 
-        # Port
-        rx.input(
-            placeholder="Port",
-            value=DBState.port.to(str),
-            on_change=DBState.set_port,
-            size="2",
-            width="100%",
-        ),
+                # Port
+                rx.input(
+                    placeholder="Port",
+                    value=DBState.port.to(str),
+                    on_change=DBState.set_port,
+                    size="2",
+                    width="100%",
+                ),
 
-        # Database
-        rx.input(
-            placeholder="Database / Service Name *",
-            value=DBState.database,
-            on_change=DBState.set_database,
-            size="2",
-            width="100%",
-            required=True,
-        ),
+                # Database
+                rx.input(
+                    placeholder="Database / Service Name *",
+                    value=DBState.database,
+                    on_change=DBState.set_database,
+                    size="2",
+                    width="100%",
+                    required=True,
+                ),
 
-        # Username
-        rx.input(
-            placeholder="Username *",
-            value=DBState.username,
-            on_change=DBState.set_username,
-            size="2",
-            width="100%",
-            required=True,
-        ),
+                # Username
+                rx.input(
+                    placeholder="Username *",
+                    value=DBState.username,
+                    on_change=DBState.set_username,
+                    size="2",
+                    width="100%",
+                    required=True,
+                ),
 
-        # Password
-        rx.input(
-            placeholder="Password",
-            value=DBState.password,
-            on_change=DBState.set_password,
-            type="password",
-            size="2",
-            width="100%",
-        ),
+                # Password
+                rx.input(
+                    placeholder="Password",
+                    value=DBState.password,
+                    on_change=DBState.set_password,
+                    type="password",
+                    size="2",
+                    width="100%",
+                ),
 
-        # DSN (alternative)
-        rx.input(
-            placeholder="DSN (alternative to host/port/db)",
-            value=DBState.dsn,
-            on_change=DBState.set_dsn,
-            size="2",
-            width="100%",
-        ),
+                # DSN (alternative)
+                rx.input(
+                    placeholder="DSN (alternative to host/port/db)",
+                    value=DBState.dsn,
+                    on_change=DBState.set_dsn,
+                    size="2",
+                    width="100%",
+                ),
 
-        # Buttons
-        rx.hstack(
-            rx.tooltip(
-                rx.button(
-                    rx.cond(
-                        DBState.is_connecting,
-                        rx.spinner(size="1"),
-                        rx.icon("plug", size=14),
+                # Buttons
+                rx.hstack(
+                    rx.tooltip(
+                        rx.button(
+                            rx.cond(
+                                DBState.is_connecting,
+                                rx.spinner(size="1"),
+                                rx.icon("plug", size=14),
+                            ),
+                            rx.cond(
+                                DBState.is_connected,
+                                "Reconnect",
+                                "Connect",
+                            ),
+                            type="submit",
+                            loading=DBState.is_connecting,
+                            disabled=~DBState.can_connect,
+                            size="2",
+                            flex="1",
+                        ),
+                        content="Connect to database",
                     ),
                     rx.cond(
                         DBState.is_connected,
-                        "Reconnect",
-                        "Connect",
+                        rx.tooltip(
+                            rx.button(
+                                rx.icon("unplug", size=14),
+                                "Disconnect",
+                                type="button",
+                                on_click=DBState.disconnect,
+                                variant="outline",
+                                color_scheme="red",
+                                size="2",
+                            ),
+                            content="Disconnect from database",
+                        ),
                     ),
-                    on_click=DBState.connect,
-                    loading=DBState.is_connecting,
-                    disabled=~DBState.can_connect,
-                    size="2",
-                    flex="1",
+                    width="100%",
+                    spacing="2",
                 ),
-                content="Connect to database",
+                width="100%",
+                spacing="2",
             ),
-            rx.cond(
-                DBState.is_connected,
-                rx.tooltip(
-                    rx.button(
-                        rx.icon("unplug", size=14),
-                        "Disconnect",
-                        on_click=DBState.disconnect,
-                        variant="outline",
-                        color_scheme="red",
-                        size="2",
-                    ),
-                    content="Disconnect from database",
-                ),
-            ),
+            on_submit=lambda _: DBState.connect(),
+            reset_on_submit=False,
             width="100%",
-            spacing="2",
         ),
 
         # Connection error (CSS display instead of rx.cond to avoid ghost a11y node)
